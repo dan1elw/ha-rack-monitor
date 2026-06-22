@@ -1,0 +1,252 @@
+# =============================================================
+# ha-rack-monitor (c) dan1elw
+# https://github.com/dan1elw/ha-rack-monitor
+# version 1.0
+# =============================================================
+# Rack-Controller – ESP32-WROOM-32 DevKitC (38-Pin)
+# Funktion: Temperaturüberwachung + PWM-Lüftersteuerung
+# Integration: Home Assistant via native API (ESPHome)
+# =============================================================
+# Pinbelegung (finalisiert):
+#   GPIO4   1-Wire-Bus (DS18B20, 4,7 kΩ Pull-up extern)
+#   GPIO21  I²C SDA (BME280)
+#   GPIO22  I²C SCL (BME280)
+#   GPIO25  PWM Lüfter 1 (über Level-Shifter, 25 kHz)
+#   GPIO26  PWM Lüfter 2 (über Level-Shifter, 25 kHz)
+#   GPIO32  Tacho Lüfter 1 (10 kΩ Pull-up extern)
+#   GPIO33  Tacho Lüfter 2 (10 kΩ Pull-up extern)
+# =============================================================
+
+esphome:
+  name: rack-monitor
+  friendly_name: Rack Monitor
+ 
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+ 
+logger:
+
+# ---------- Konnektivitaet ----------
+# Native Home-Assistant-API. Geraetespezifischer Key - inline,
+# NICHT in secrets.yaml auslagern
+api:
+  encryption:
+    key: "HIER_VOM_ASSISTENTEN_GENERIERTEN_KEY_EINFUEGEN"
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+ 
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Rack-Monitor Fallback"
+    password: !secret fallback_password
+ 
+captive_portal:
+
+# Weboberflaeche zur Direktdiagnose unter http://<IP>
+web_server:
+  port: 80
+
+# ---------- Busse ----------
+i2c:
+  sda: GPIO21
+  scl: GPIO22
+  scan: true              # listet I2C-Adressen beim Boot ins Log
+  frequency: 100kHz       # konservativ, stabil auch bei laengeren Leitungen
+
+one_wire:
+  - platform: gpio
+    pin: GPIO4        # 4,7-kOhm-Pull-up extern vorhanden
+
+# ---------- Sensoren ----------
+sensor:
+  # BMP280 - Umgebungsklima im Rack (verifiziert: BMP280, keine Luftfeuchte)
+  - platform: bmp280_i2c
+    address: 0x76         # alternativ 0x77, falls i2c-Scan das meldet
+    update_interval: 30s
+    temperature:
+      name: "Rack Temperatur"
+      id: temp_rack
+      oversampling: 16x
+    pressure:
+      name: "Rack Luftdruck"
+ 
+  # DS18B20 - Punktmessungen (ROM-Adressen aus dem Boot-Log)
+  - platform: dallas_temp
+    address: 0xae0000006c0e3c28
+    name: "Temperatur Zone 1"
+    id: temp_zone1
+    update_interval: 15s
+ 
+  - platform: dallas_temp
+    address: 0xcb0000006c8fd128
+    name: "Temperatur Zone 2"
+    id: temp_zone2
+    update_interval: 15s
+ 
+  # Tachosignale - Arctic P12 Pro liefert 2 Impulse pro Umdrehung
+  - platform: pulse_counter
+    pin:
+      number: GPIO32
+      mode:
+        input: true
+        pullup: false   # externe 10-kOhm-Pull-ups vorhanden
+    name: "Luefter 1 Drehzahl"
+    unit_of_measurement: "RPM"
+    icon: mdi:fan
+    filters:
+      - multiply: 0.5   # Impulse/min -> U/min
+    update_interval: 10s
+ 
+  - platform: pulse_counter
+    pin:
+      number: GPIO33
+      mode:
+        input: true
+        pullup: false
+    name: "Luefter 2 Drehzahl"
+    unit_of_measurement: "RPM"
+    icon: mdi:fan
+    filters:
+      - multiply: 0.5
+    update_interval: 10s
+ 
+  # --- Diagnose-Sensoren ---
+  # Uptime: springt bei jedem Reboot auf 0 -> ideal zur Verifikation,
+  # ob die Spannungseinbrueche nach Elko-Einbau wirklich weg sind.
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 60s
+ 
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+ 
+  # Interne Chip-Temperatur des ESP32 (nicht die Rack-Temperatur)
+  - platform: internal_temperature
+    name: "ESP32 Temperatur"
+    update_interval: 60s
+ 
+# ---------- PWM-Ausgaenge ----------
+# Intel-Spezifikation fuer 4-Pin-PWM: 25 kHz
+# Arctic P12 Pro: Zielfrequenz 25 kHz, Bereich 21-28 kHz -> passt
+output:
+  - platform: ledc
+    pin: GPIO25
+    frequency: 25000 Hz
+    id: pwm_fan1
+ 
+  - platform: ledc
+    pin: GPIO26
+    frequency: 25000 Hz
+    id: pwm_fan2
+ 
+# ---------- Luefter-Entitaeten ----------
+# RESTORE_DEFAULT_ON: nach Stromausfall laufen Luefter an, nicht aus
+fan:
+  - platform: speed
+    output: pwm_fan1
+    name: "Luefter 1"
+    id: fan1
+    restore_mode: RESTORE_DEFAULT_ON
+ 
+  - platform: speed
+    output: pwm_fan2
+    name: "Luefter 2"
+    id: fan2
+    restore_mode: RESTORE_DEFAULT_ON
+ 
+# ---------- Automatikmodus (Luefterkurve) ----------
+# Aus = manuelle Steuerung ueber die Fan-Entitaeten
+switch:
+  - platform: template
+    name: "Luefter Automatik"
+    id: auto_mode
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+ 
+number:
+  # Einschaltschwelle: ab dieser GERAETE-Temperatur (max der DS18B20)
+  # laufen die Luefter an. Darunter -> aus. 100 % bei Schwelle + 10 °C.
+  # In HA per Schieber einstellbar.
+  - platform: template
+    name: "Zieltemperatur"
+    id: target_temp
+    optimistic: true
+    min_value: 25
+    max_value: 45
+    step: 1
+    initial_value: 28
+    restore_value: true
+    unit_of_measurement: "°C"
+ 
+interval:
+  # Faehrt die Luefterkurve alle 20 s neu, solange Automatik aktiv ist.
+  # Geregelt wird nach dem HEISSESTEN Geraet (max der beiden DS18B20),
+  # nicht nach dem BMP280 - dieser misst nur die Luft am ESP und
+  # dient ausschliesslich der Anzeige.
+  - interval: 20s
+    then:
+      - lambda: |-
+          if (!id(auto_mode).state) return;
+ 
+          // Hoechsten gueltigen DS18B20-Wert bestimmen
+          float t = -1000.0;
+          if (!isnan(id(temp_zone1).state)) t = id(temp_zone1).state;
+          if (!isnan(id(temp_zone2).state) && id(temp_zone2).state > t)
+            t = id(temp_zone2).state;
+          if (t < -100.0) return;   // beide Sensoren ungueltig -> nichts tun
+ 
+          float t_low = id(target_temp).state;   // Einschaltschwelle
+          float t_high = t_low + 10.0;           // 100 % bei Schwelle + 10 °C
+ 
+          // Aktuellen Luefterzustand fuer Hysterese pruefen
+          bool running = id(fan1).state;
+ 
+          float speed;
+          if (t < t_low - 1.0) {
+            // Sicher unter Schwelle -> aus
+            speed = 0.0;
+          } else if (t < t_low) {
+            // Hysterese-Zone (t_low-1 .. t_low):
+            // laeuft weiter, wenn schon an; bleibt aus, wenn aus
+            speed = running ? 0.20 : 0.0;
+          } else if (t >= t_high) {
+            speed = 1.00;
+          } else {
+            speed = 0.20 + (t - t_low) / (t_high - t_low) * 0.80;
+          }
+ 
+          // Anwenden auf beide Luefter
+          if (speed <= 0.0) {
+            id(fan1).turn_off().perform();
+            id(fan2).turn_off().perform();
+          } else {
+            auto call1 = id(fan1).turn_on();
+            call1.set_speed((int)(speed * 100));
+            call1.perform();
+ 
+            auto call2 = id(fan2).turn_on();
+            call2.set_speed((int)(speed * 100));
+            call2.perform();
+          }
+ 
+# ---------- Diagnose ----------
+binary_sensor:
+  - platform: status
+    name: "Rack Monitor Status"
+ 
+text_sensor:
+  - platform: wifi_info
+    ip_address:
+      name: "IP-Adresse"
+ 
+# Neustart aus Home Assistant heraus, ohne physischen Zugriff
+button:
+  - platform: restart
+    name: "Rack Monitor Neustart"
