@@ -1,2 +1,6 @@
-# draw.io
+# drawio
 *.bkp
+
+# freecad
+*.FCStd1
+*.FCStd2
