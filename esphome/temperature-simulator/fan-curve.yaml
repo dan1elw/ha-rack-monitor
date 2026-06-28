@@ -1,0 +1,56 @@
+# fan_curve.yaml
+# -----------------------------------------------------------------------------
+# Auszug aus rack-monitor.yaml: automatische Luefterkurve.
+# Geregelt wird nach dem HEISSESTEN der beiden DS18B20-Sensoren
+# (BMP280 bleibt Anzeige-only).
+# Das Python-Skript fan_curve_plot.py reproduziert diese Logik 1:1.
+# -----------------------------------------------------------------------------
+
+interval:
+  # Faehrt die Luefterkurve alle 20 s neu, solange Automatik aktiv ist.
+  - interval: 20s
+    then:
+      - lambda: |-
+          if (!id(auto_mode).state) return;
+
+          // Hoechsten gueltigen DS18B20-Wert bestimmen
+          float t = -1000.0;
+          if (!isnan(id(temp_zone1).state)) t = id(temp_zone1).state;
+          if (!isnan(id(temp_zone2).state) && id(temp_zone2).state > t)
+            t = id(temp_zone2).state;
+          if (t < -100.0) return;   // beide Sensoren ungueltig -> nichts tun
+
+          float t_low  = id(target_temp).state;   // Einschaltschwelle (HA-Slider)
+          float t_high = t_low + 10.0;            // 100 % bei Schwelle + 10 °C
+
+          // Aktuellen Luefterzustand fuer Hysterese pruefen
+          bool running = id(fan1).state;
+
+          float speed;
+          if (t < t_low - 1.0) {
+            // Sicher unter Schwelle -> aus
+            speed = 0.0;
+          } else if (t < t_low) {
+            // Hysterese-Zone (t_low-1 .. t_low):
+            // laeuft weiter, wenn schon an; bleibt aus, wenn aus
+            speed = running ? 0.20 : 0.0;
+          } else if (t >= t_high) {
+            speed = 1.00;
+          } else {
+            // Linearer Anstieg 20 % .. 100 %
+            speed = 0.20 + (t - t_low) / (t_high - t_low) * 0.80;
+          }
+
+          // Anwenden auf beide Luefter
+          if (speed <= 0.0) {
+            id(fan1).turn_off().perform();
+            id(fan2).turn_off().perform();
+          } else {
+            auto call1 = id(fan1).turn_on();
+            call1.set_speed((int)(speed * 100));
+            call1.perform();
+
+            auto call2 = id(fan2).turn_on();
+            call2.set_speed((int)(speed * 100));
+            call2.perform();
+          }
