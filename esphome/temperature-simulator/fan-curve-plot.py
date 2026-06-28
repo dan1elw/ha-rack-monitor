@@ -221,26 +221,25 @@ def plot(temps: np.ndarray, warming_pct: np.ndarray, cooling_pct: np.ndarray,
             prev = i
         ax.axvspan(temps[start], temps[prev], alpha=alpha, color=color, label=label)
 
-    shade(aus_mask,  "tab:blue",   0.08, "Aus")
+    shade(aus_mask,  "tab:blue",   0.08, "Off ")
     shade(hyst_mask, "tab:orange", 0.18, "Hysterese")
-    shade(full_mask, "tab:red",    0.12, "Volllast")
+    shade(full_mask, "tab:red",    0.12, "Max")
 
     ax.plot(temps, warming_pct, color="#1f77b4", lw=2.4,
-            label="Aufwaerts (aus -> an)")
+            label="Warming")
     ax.plot(temps, cooling_pct, color="#d62728", lw=2.4, ls="--",
-            label="Abkuehlend (an -> aus)")
+            label="Cooling")
 
-    ax.set_xlabel("Geraete-Temperatur, max(DS18B20)  [°C]")
-    ax.set_ylabel("PWM-Tastverhaeltnis  [%]")
+    ax.set_xlabel("Temperature, max(DS18B20)  [°C]")
+    ax.set_ylabel("PWM-Steps [%]")
     ax.set_title(
-        f"Luefterkurve aus {yaml_path.name}  (target_temp = {t_target:.0f} °C)\n"
+        f"fan-curve from {yaml_path.name}  (target_temp = {t_target:.0f} °C)\n"
     )
     ax.set_xlim(temps[0], temps[-1])
     ax.set_ylim(-5, 110)
     ax.set_yticks(range(0, 101, 20))
     ax.grid(True, alpha=0.3)
-    ax.legend(loc="center left", bbox_to_anchor=(1.01, 0.5), fontsize=9,
-              framealpha=0.95)
+    ax.legend(loc="lower right", framealpha=0.95)
 
     fig.tight_layout()
     fig.savefig(outfile, dpi=150, bbox_inches="tight")
@@ -265,7 +264,7 @@ def main() -> None:
                         help="Untere Temperatur des Sweeps. Default: target_temp - 5")
     parser.add_argument("--t-max", type=float, default=None,
                         help="Obere Temperatur des Sweeps. Default: target_temp + 14")
-    parser.add_argument("--steps", type=int, default=1801,
+    parser.add_argument("--steps", type=int, default=1000,
                         help="Anzahl Sweep-Punkte. Default: 1801 (~0.01 °C)")
     parser.add_argument("-o", "--output", type=Path, default=Path("esphome/temperature-simulator/fan_curve.png"))
     parser.add_argument("--show", action="store_true")
