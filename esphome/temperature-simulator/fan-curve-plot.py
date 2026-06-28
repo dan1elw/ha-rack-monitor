@@ -234,7 +234,6 @@ def plot(temps: np.ndarray, warming_pct: np.ndarray, cooling_pct: np.ndarray,
     ax.set_ylabel("PWM-Tastverhaeltnis  [%]")
     ax.set_title(
         f"Luefterkurve aus {yaml_path.name}  (target_temp = {t_target:.0f} °C)\n"
-        f"simuliert via kompiliertem Original-Lambda"
     )
     ax.set_xlim(temps[0], temps[-1])
     ax.set_ylim(-5, 110)
