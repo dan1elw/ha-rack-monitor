@@ -145,6 +145,10 @@ output:
     pin: GPIO26
     frequency: 25000 Hz
     id: pwm_fan2
+
+  - platform: gpio
+    pin: GPIO14
+    id: led_status_gruen
  
 # ---------- Luefter-Entitaeten ----------
 # RESTORE_DEFAULT_ON: nach Stromausfall laufen Luefter an, nicht aus
@@ -235,6 +239,22 @@ interval:
             call2.set_speed((int)(speed * 100));
             call2.perform();
           }
+  - interval: 500ms
+    then:
+      - if:
+          condition:
+            not:
+              wifi.connected:
+          then:
+            - output.toggle: led_status_gruen   # Blinken (1 Hz)
+          else:
+            - if:
+                condition:
+                  switch.is_on: auto_mode
+                then:
+                  - output.turn_on: led_status_gruen   # Dauerlicht
+                else:
+                  - output.turn_off: led_status_gruen  # Aus
  
 # ---------- Diagnose ----------
 binary_sensor:
