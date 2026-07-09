@@ -147,7 +147,7 @@ output:
     id: pwm_fan2
 
   - platform: gpio
-    pin: GPIO14
+    pin: GPIO13
     id: led_status_gruen
  
 # ---------- Luefter-Entitaeten ----------
