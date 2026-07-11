@@ -53,47 +53,41 @@ web_server:
   port: 80
 
 # ---------- Busse ----------
-#i2c:
-#  sda: GPIO21
-#  scl: GPIO22
-#  scan: true              # listet I2C-Adressen beim Boot ins Log
-#  frequency: 100kHz       # konservativ, stabil auch bei laengeren Leitungen
-
 one_wire:
   - platform: gpio
     pin: GPIO4        # 4,7-kOhm-Pull-up extern vorhanden
 
 # ---------- Sensoren ----------
 sensor:
-  # BMP280 - Umgebungsklima im Rack (verifiziert: BMP280, keine Luftfeuchte)
-  #- platform: bmp280_i2c
-  #  address: 0x76         # alternativ 0x77, falls i2c-Scan das meldet
-  #  update_interval: 30s
-  #  temperature:
-  #    name: "Rack Temperatur"
-  #    id: temp_rack
-  #    oversampling: 16x
-  #  pressure:
-  #    name: "Rack Luftdruck"
- 
   # DS18B20 - Punktmessungen (ROM-Adressen aus dem Boot-Log)
   - platform: dallas_temp
     address: 0x2e0000006c76c428
-    name: "Temperatur Zone 1"
-    id: temp_zone1
-    update_interval: 10s
+    id: rack_temp_1
+    name: "Rack Temp 1"
+    update_interval: 15s
  
   - platform: dallas_temp
     address: 0x9a0000006bd8df28
-    name: "Temperatur Zone 2"
-    id: temp_zone2
-    update_interval: 10s
+    id: rack_temp_2
+    name: "Rack Temp 2"
+    update_interval: 15s
 
   - platform: dallas_temp
     address: 0x990000006bf7c528
-    name: "Temperatur Zone 3"
-    id: temp_zone3
-    update_interval: 10s
+    id: intake_temp
+    name: "Intake Temp"
+    update_interval: 15s
+
+  - platform: template
+    name: "Rack Delta T"
+    id: rack_delta_t
+    unit_of_measurement: "K"
+    accuracy_decimals: 1
+    update_interval: 15s
+    lambda: |-
+      float rack = max(id(rack_temp_1).state, id(rack_temp_2).state);
+      if (isnan(rack) || isnan(id(intake_temp).state)) return NAN;
+      return rack - id(intake_temp).state;
  
   # Tachosignale - Arctic P12 Pro liefert 2 Impulse pro Umdrehung
   - platform: pulse_counter
@@ -151,10 +145,6 @@ output:
     pin: GPIO26
     frequency: 25000 Hz
     id: pwm_fan2
-
-  - platform: gpio
-    pin: GPIO13
-    id: led_status_gruen
  
 # ---------- Luefter-Entitaeten ----------
 # RESTORE_DEFAULT_ON: nach Stromausfall laufen Luefter an, nicht aus
@@ -184,72 +174,44 @@ switch:
     id: led_status_gruen
     internal: true          # taucht nicht in HA auf
     restore_mode: ALWAYS_OFF
- 
-number:
-  # Einschaltschwelle: ab dieser GERAETE-Temperatur (max der DS18B20)
-  # laufen die Luefter an. Darunter -> aus. 100 % bei Schwelle + 10 °C.
-  # In HA per Schieber einstellbar.
-  - platform: template
-    name: "Zieltemperatur"
-    id: target_temp
-    optimistic: true
-    min_value: 25
-    max_value: 45
-    step: 1
-    initial_value: 28
-    restore_value: true
-    unit_of_measurement: "°C"
- 
+
 interval:
-  # Faehrt die Luefterkurve alle 20 s neu, solange Automatik aktiv ist.
-  # Geregelt wird nach dem HEISSESTEN Geraet (max der beiden DS18B20),
-  # nicht nach dem BMP280 - dieser misst nur die Luft am ESP und
-  # dient ausschliesslich der Anzeige.
-  - interval: 20s
+  - interval: 15s
     then:
       - lambda: |-
           if (!id(auto_mode).state) return;
- 
-          // Hoechsten gueltigen DS18B20-Wert bestimmen
-          float t = -1000.0;
-          if (!isnan(id(temp_zone1).state)) t = id(temp_zone1).state;
-          if (!isnan(id(temp_zone2).state) && id(temp_zone2).state > t)
-            t = id(temp_zone2).state;
-          if (t < -100.0) return;   // beide Sensoren ungueltig -> nichts tun
- 
-          float t_low = id(target_temp).state;   // Einschaltschwelle
-          float t_high = t_low + 10.0;           // 100 % bei Schwelle + 10 °C
- 
-          // Aktuellen Luefterzustand fuer Hysterese pruefen
-          bool running = id(fan1).state;
- 
-          float speed;
-          if (t < t_low - 1.0) {
-            // Sicher unter Schwelle -> aus
-            speed = 0.0;
-          } else if (t < t_low) {
-            // Hysterese-Zone (t_low-1 .. t_low):
-            // laeuft weiter, wenn schon an; bleibt aus, wenn aus
-            speed = running ? 0.20 : 0.0;
-          } else if (t >= t_high) {
-            speed = 1.00;
+
+          float t1 = id(rack_temp_1).state;
+          float t2 = id(rack_temp_2).state;
+          float tin = id(intake_temp).state;
+          float rack = max(t1, t2);
+          if (isnan(rack)) return;  // beide Rack-Sensoren tot: keine Änderung
+
+          static bool fans_on = false;
+          float pwm = 0.0f;
+
+          if (!isnan(tin)) {
+            // Primär: Delta-T-Regelung
+            float dt = rack - tin;
+            const float DT_ON = 4.0f, DT_OFF = 3.0f, DT_MAX = 12.0f;
+            if (fans_on ? (dt > DT_OFF) : (dt >= DT_ON)) {
+              pwm = 0.2f + 0.8f * (dt - DT_ON) / (DT_MAX - DT_ON);
+            }
           } else {
-            speed = 0.20 + (t - t_low) / (t_high - t_low) * 0.80;
+            // Fallback: Absolutkurve (bisherige Logik)
+            if (rack >= 28.0f) {
+              pwm = 0.2f + 0.8f * (rack - 28.0f) / 10.0f;
+            }
           }
- 
-          // Anwenden auf beide Luefter
-          if (speed <= 0.0) {
-            id(fan1).turn_off().perform();
-            id(fan2).turn_off().perform();
-          } else {
-            auto call1 = id(fan1).turn_on();
-            call1.set_speed((int)(speed * 100));
-            call1.perform();
- 
-            auto call2 = id(fan2).turn_on();
-            call2.set_speed((int)(speed * 100));
-            call2.perform();
-          }
+
+          // Absolut-Override (Sicherheitsnetz)
+          if (rack >= 38.0f) pwm = 1.0f;
+
+          pwm = clamp(pwm, 0.0f, 1.0f);
+          fans_on = pwm > 0.0f;
+
+          id(pwm_fan1).set_level(pwm);
+          id(pwm_fan2).set_level(pwm);
   - interval: 500ms
     then:
       - if:
