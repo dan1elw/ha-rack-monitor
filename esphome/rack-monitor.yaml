@@ -78,16 +78,22 @@ sensor:
  
   # DS18B20 - Punktmessungen (ROM-Adressen aus dem Boot-Log)
   - platform: dallas_temp
-    address: 0xae0000006c0e3c28
+    address: 0x2e0000006c76c428
     name: "Temperatur Zone 1"
     id: temp_zone1
-    update_interval: 15s
+    update_interval: 10s
  
   - platform: dallas_temp
-    address: 0xcb0000006c8fd128
+    address: 0x9a0000006bd8df28
     name: "Temperatur Zone 2"
     id: temp_zone2
-    update_interval: 15s
+    update_interval: 10s
+
+  - platform: dallas_temp
+    address: 0x990000006bf7c528
+    name: "Temperatur Zone 3"
+    id: temp_zone3
+    update_interval: 10s
  
   # Tachosignale - Arctic P12 Pro liefert 2 Impulse pro Umdrehung
   - platform: pulse_counter
