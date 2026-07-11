@@ -53,11 +53,11 @@ web_server:
   port: 80
 
 # ---------- Busse ----------
-i2c:
-  sda: GPIO21
-  scl: GPIO22
-  scan: true              # listet I2C-Adressen beim Boot ins Log
-  frequency: 100kHz       # konservativ, stabil auch bei laengeren Leitungen
+#i2c:
+#  sda: GPIO21
+#  scl: GPIO22
+#  scan: true              # listet I2C-Adressen beim Boot ins Log
+#  frequency: 100kHz       # konservativ, stabil auch bei laengeren Leitungen
 
 one_wire:
   - platform: gpio
@@ -66,15 +66,15 @@ one_wire:
 # ---------- Sensoren ----------
 sensor:
   # BMP280 - Umgebungsklima im Rack (verifiziert: BMP280, keine Luftfeuchte)
-  - platform: bmp280_i2c
-    address: 0x76         # alternativ 0x77, falls i2c-Scan das meldet
-    update_interval: 30s
-    temperature:
-      name: "Rack Temperatur"
-      id: temp_rack
-      oversampling: 16x
-    pressure:
-      name: "Rack Luftdruck"
+  #- platform: bmp280_i2c
+  #  address: 0x76         # alternativ 0x77, falls i2c-Scan das meldet
+  #  update_interval: 30s
+  #  temperature:
+  #    name: "Rack Temperatur"
+  #    id: temp_rack
+  #    oversampling: 16x
+  #  pressure:
+  #    name: "Rack Luftdruck"
  
   # DS18B20 - Punktmessungen (ROM-Adressen aus dem Boot-Log)
   - platform: dallas_temp
