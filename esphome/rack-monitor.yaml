@@ -173,6 +173,11 @@ switch:
     id: auto_mode
     optimistic: true
     restore_mode: RESTORE_DEFAULT_ON
+  - platform: gpio
+    pin: GPIO13
+    id: led_status_gruen
+    internal: true          # taucht nicht in HA auf
+    restore_mode: ALWAYS_OFF
  
 number:
   # Einschaltschwelle: ab dieser GERAETE-Temperatur (max der DS18B20)
@@ -246,15 +251,15 @@ interval:
             not:
               wifi.connected:
           then:
-            - output.toggle: led_status_gruen   # Blinken (1 Hz)
+            - switch.toggle: led_status_gruen
           else:
             - if:
                 condition:
                   switch.is_on: auto_mode
                 then:
-                  - output.turn_on: led_status_gruen   # Dauerlicht
+                  - switch.turn_on: led_status_gruen
                 else:
-                  - output.turn_off: led_status_gruen  # Aus
+                  - switch.turn_off: led_status_gruen
  
 # ---------- Diagnose ----------
 binary_sensor:
