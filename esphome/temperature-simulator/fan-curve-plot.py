@@ -1,316 +1,224 @@
 #!/usr/bin/env python3
+#!/usr/bin/env python3
 """
-fan_curve_plot.py
------------------
-Simuliert die Luefterkurve aus rack-monitor.yaml, indem der ORIGINAL-Lambda-
-Code-Block zur Laufzeit als C++-Shared-Library kompiliert und ueber ctypes
-aufgerufen wird. Keine Python-Reimplementation der Regel-Logik.
+fan_curve_plot.py - Simulator fuer die Rack-Monitor-Lueftersteuerung
+====================================================================
+Prinzip "Single Source of Truth":
+Die Regelungslogik wird NICHT in Python nachgebaut. Stattdessen wird
+die C++-Lambda direkt aus rack-monitor.yaml extrahiert, in einen
+Test-Harness eingebettet, mit g++ kompiliert und via ctypes aufgerufen.
+Aendert sich das YAML, aendert sich der Plot automatisch mit.
 
-Workflow:
-  1. YAML laden, lambda-String aus 'interval' extrahieren
-  2. In ein C++-Shim einbetten, das die ESPHome-API mockt
-  3. Mit g++ zu .so kompilieren
-  4. ctypes laedt die Lib, sweep ueber Temperaturen, Plot
+Simulierte Logik (Variante C - Hybrid):
+  Primaer:   Delta-T-Regelung (Ein >= 4 K, Aus < 3 K, 20-100 % @ 4-12 K)
+  Fallback:  Absolutkurve bei totem Zuluftsensor (28-38 C)
+  Override:  >= 38 C absolut -> 100 %
 
-Abhaengigkeiten: PyYAML, numpy, matplotlib, ein C++17-Compiler (g++ oder clang++).
+Nutzung:  python3 fan_curve_plot.py [pfad/zu/rack-monitor.yaml]
+Ausgabe:  fan_curve.png
+Benoetigt: g++, PyYAML, matplotlib, numpy
 """
 
-from __future__ import annotations
-
-import argparse
 import ctypes
 import shutil
 import subprocess
 import sys
 import tempfile
-import textwrap
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 import yaml
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+YAML_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("esphome/rack-monitor.yaml")
+PNG_PATH = Path("esphome/temperature-simulator/fan_curve.png")
+
+# ----------------------------------------------------------------------
+# 1. Lambda aus dem YAML extrahieren
+# ----------------------------------------------------------------------
+
+class EsphomeLoader(yaml.SafeLoader):
+    """SafeLoader, der ESPHome-Tags (!secret, !include, ...) toleriert."""
+
+EsphomeLoader.add_multi_constructor("!", lambda loader, suffix, node: None)
 
 
-# ============================================================================
-# C++-Shim: mockt die ESPHome-API genau soweit wie das Lambda sie verwendet.
-# Erweitern, sobald das Lambda neue ESPHome-Aufrufe nutzt.
-# ============================================================================
-SHIM_TEMPLATE = r"""
-// Auto-generiert von fan_curve_plot.py - nicht von Hand editieren.
-#include <math.h>   // isnan() als Makro im globalen Namespace
-#include <cstddef>
+def extract_control_lambda(yaml_path: Path) -> str:
+    """Findet die Regelungs-Lambda im interval-Block (Kennung: make_call)."""
+    config = yaml.load(yaml_path.read_text(encoding="utf-8"), Loader=EsphomeLoader)
+    for entry in config.get("interval", []):
+        for action in entry.get("then", []):
+            code = action.get("lambda") if isinstance(action, dict) else None
+            if code and "make_call" in code:
+                return code
+    raise RuntimeError("Regelungs-Lambda (make_call) nicht im interval-Block gefunden")
 
-extern "C" {
 
-// ---- ESPHome-Mock-Typen ----------------------------------------------------
+# ----------------------------------------------------------------------
+# 2. C++-Harness: stellt die ESPHome-Umgebung der Lambda nach
+# ----------------------------------------------------------------------
+
+HARNESS = r"""
+#include <cmath>
+#include <initializer_list>
+using std::isnan;
+
+template <typename T>
+static T clamp(T v, T lo, T hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
 struct Sensor { float state; };
 struct Switch { bool  state; };
-struct Number { float state; };
 
 struct Fan;
 struct FanCall {
-    Fan* target;
-    int  op;          // 0 = turn_on, 1 = turn_off
-    int  speed_pct;   // -1 = nicht gesetzt
-    FanCall& set_speed(int s)   { speed_pct = s; return *this; }
-    FanCall& set_speed(float f) { speed_pct = (int)(f * 100.0f); return *this; }
+    Fan *fan;
+    bool has_state = false, state = false;
+    bool has_speed = false;  int  speed = 0;
+    FanCall &set_state(bool s) { has_state = true; state = s; return *this; }
+    FanCall &set_speed(int  s) { has_speed = true; speed = s; return *this; }
     void perform();
 };
-
 struct Fan {
-    bool state;
-    int  speed_pct;
-    FanCall turn_on()  { return FanCall{this, 0, -1}; }
-    FanCall turn_off() { return FanCall{this, 1,  0}; }
+    bool state = false;
+    int  speed = 0;
+    FanCall make_call() { FanCall c; c.fan = this; return c; }
 };
-
 void FanCall::perform() {
-    if (op == 0) {
-        target->state = true;
-        if (speed_pct >= 0) target->speed_pct = speed_pct;
-    } else {
-        target->state = false;
-        target->speed_pct = 0;
-    }
+    if (has_state) fan->state = state;
+    if (has_speed) fan->speed = speed;
 }
 
-// ---- IDs aus der YAML ------------------------------------------------------
+// Nachbildung der im YAML referenzierten IDs
+static Sensor rack_temp_1, rack_temp_2, intake_temp;
 static Switch auto_mode;
-static Sensor temp_zone1;
-static Sensor temp_zone2;
-static Number target_temp;
-static Fan    fan1;
-static Fan    fan2;
+static bool   auto_writing = false;
+static Fan    fan1_obj, fan2_obj;
+static Fan   *fan1 = &fan1_obj, *fan2 = &fan2_obj;
 
-// id(x) in der YAML wird zu einem Referenz-Verweis auf die Mock-Instanz
 #define id(x) (x)
 
-// ---- Simulations-API (von Python aus aufgerufen) ---------------------------
-void sim_set_inputs(int auto_on, float t1, float t2, float t_target,
-                    int fan1_running, int fan1_pct,
-                    int fan2_running, int fan2_pct) {
-    auto_mode.state   = (auto_on != 0);
-    temp_zone1.state  = t1;
-    temp_zone2.state  = t2;
-    target_temp.state = t_target;
-    fan1.state        = (fan1_running != 0);
-    fan1.speed_pct    = fan1_pct;
-    fan2.state        = (fan2_running != 0);
-    fan2.speed_pct    = fan2_pct;
+// --- Original-Lambda aus rack-monitor.yaml (unveraendert eingefuegt) ---
+static void run_control() {
+{LAMBDA_BODY}
 }
+// -----------------------------------------------------------------------
 
-int sim_get_fan1_state() { return fan1.state ? 1 : 0; }
-int sim_get_fan1_pct()   { return fan1.speed_pct; }
-int sim_get_fan2_state() { return fan2.state ? 1 : 0; }
-int sim_get_fan2_pct()   { return fan2.speed_pct; }
-
-// ---- Hier wird das ORIGINAL-Lambda eingebettet -----------------------------
-void sim_run() {
-    // ====== BEGIN ORIGINAL LAMBDA (aus YAML) ======
-__LAMBDA_BODY__
-    // ====== END ORIGINAL LAMBDA ==================
+extern "C" void simulate(float t1, float t2, float tin, int auto_on,
+                         float *pwm_out, int *on_out) {
+    rack_temp_1.state = t1;
+    rack_temp_2.state = t2;
+    intake_temp.state = tin;
+    auto_mode.state   = auto_on != 0;
+    run_control();
+    *on_out  = fan1_obj.state ? 1 : 0;
+    *pwm_out = fan1_obj.state ? fan1_obj.speed / 100.0f : 0.0f;
 }
-
-}  // extern "C"
 """
 
 
-# ============================================================================
-# YAML einlesen und Lambda-Block extrahieren
-# ============================================================================
-def extract_lambda(yaml_path: Path) -> str:
-    """Findet den ersten 'lambda'-Eintrag innerhalb von 'interval'."""
-    with yaml_path.open(encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-
-    if not isinstance(data, dict) or "interval" not in data:
-        raise SystemExit(f"Keine 'interval'-Sektion in {yaml_path} gefunden.")
-
-    for entry in data["interval"]:
-        for action in entry.get("then", []) or []:
-            if isinstance(action, dict) and "lambda" in action:
-                return action["lambda"]
-
-    raise SystemExit(f"Keine 'lambda'-Action in 'interval' in {yaml_path} gefunden.")
+def compile_lambda(lambda_code: str, build_dir: Path) -> Path:
+    body = "\n".join("    " + line for line in lambda_code.splitlines())
+    src = build_dir / "harness.cpp"
+    src.write_text(HARNESS.replace("{LAMBDA_BODY}", body), encoding="utf-8")
+    lib = build_dir / "control.so"
+    subprocess.run(
+        ["g++", "-shared", "-fPIC", "-O2", "-o", str(lib), str(src)],
+        check=True,
+    )
+    return lib
 
 
-# ============================================================================
-# C++ generieren und kompilieren
-# ============================================================================
-def compile_lambda(lambda_body: str, build_dir: Path, verbose: bool = False) -> Path:
-    indented = textwrap.indent(lambda_body.rstrip(), "    ")
-    src_code = SHIM_TEMPLATE.replace("__LAMBDA_BODY__", indented)
+class Controller:
+    """Eine isolierte Instanz der Regelung (eigener Hysterese-Zustand).
 
-    src = build_dir / "fan_curve_shim.cpp"
-    so  = build_dir / "fan_curve_shim.so"
-    src.write_text(src_code, encoding="utf-8")
+    Der Hysterese-Zustand lebt als static-Variable in der Lambda. Fuer
+    unabhaengige Szenarien wird die .so daher jeweils als eigene Kopie
+    geladen (frischer Zustand pro Instanz).
+    """
 
-    cxx = shutil.which("g++") or shutil.which("clang++")
-    if cxx is None:
-        raise SystemExit("Kein C++-Compiler gefunden. Bitte g++ oder clang++ installieren.")
+    _counter = 0
 
-    cmd = [cxx, "-O2", "-std=c++17", "-Wall", "-fPIC", "-shared",
-           str(src), "-o", str(so)]
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-
-    if proc.returncode != 0:
-        print("Kompilierfehler:", file=sys.stderr)
-        print(proc.stderr, file=sys.stderr)
-        print(f"\nGenerierter Quelltext liegt in {src}", file=sys.stderr)
-        raise SystemExit(1)
-
-    if verbose and proc.stderr:
-        print(proc.stderr, file=sys.stderr)
-
-    return so
-
-
-# ============================================================================
-# Ctypes-Wrapper um die kompilierte Lib
-# ============================================================================
-class LambdaSim:
-    def __init__(self, so_path: Path) -> None:
-        self.lib = ctypes.CDLL(str(so_path))
-        self.lib.sim_set_inputs.argtypes = [
-            ctypes.c_int, ctypes.c_float, ctypes.c_float, ctypes.c_float,
-            ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+    def __init__(self, lib_path: Path):
+        Controller._counter += 1
+        copy = lib_path.with_name(f"control_{Controller._counter}.so")
+        shutil.copy(lib_path, copy)
+        self._lib = ctypes.CDLL(str(copy))
+        self._lib.simulate.argtypes = [
+            ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_int,
+            ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_int),
         ]
-        self.lib.sim_set_inputs.restype = None
-        self.lib.sim_run.argtypes = []
-        self.lib.sim_run.restype = None
-        for name in ("sim_get_fan1_state", "sim_get_fan1_pct",
-                     "sim_get_fan2_state", "sim_get_fan2_pct"):
-            getattr(self.lib, name).restype = ctypes.c_int
 
-    def step(self, t1: float, t2: float, t_target: float,
-             fan_running: bool, fan_pct: int = 50,
-             auto_on: bool = True) -> tuple:
-        self.lib.sim_set_inputs(
-            1 if auto_on else 0,
-            ctypes.c_float(t1), ctypes.c_float(t2), ctypes.c_float(t_target),
-            1 if fan_running else 0, fan_pct,
-            1 if fan_running else 0, fan_pct,
-        )
-        self.lib.sim_run()
-        return bool(self.lib.sim_get_fan1_state()), int(self.lib.sim_get_fan1_pct())
+    def step(self, t1, t2, tin, auto_on=True):
+        pwm = ctypes.c_float()
+        on = ctypes.c_int()
+        self._lib.simulate(t1, t2, tin, int(auto_on),
+                           ctypes.byref(pwm), ctypes.byref(on))
+        return pwm.value, bool(on.value)
 
 
-# ============================================================================
-# Plot
-# ============================================================================
-def plot(temps: np.ndarray, warming_pct: np.ndarray, cooling_pct: np.ndarray,
-         t_target: float, outfile: Path, yaml_path: Path) -> None:
-    fig, ax = plt.subplots(figsize=(10.5, 5.8))
+# ----------------------------------------------------------------------
+# 3. Szenarien und Plot
+# ----------------------------------------------------------------------
 
-    aus_mask  = (warming_pct == 0) & (cooling_pct == 0)
-    hyst_mask = (warming_pct == 0) & (cooling_pct > 0)
-    full_mask = (warming_pct >= 100) & (cooling_pct >= 100)
+def sweep(ctrl, rack_values, tin):
+    """Fuehrt die Regelung sequenziell aus (Hysterese-Zustand bleibt erhalten)."""
+    return np.array([ctrl.step(r, r - 0.5, tin)[0] * 100 for r in rack_values])
 
-    def shade(mask: np.ndarray, color: str, alpha: float, label) -> None:
-        if not mask.any():
-            return
-        idx = np.where(mask)[0]
-        start = idx[0]
-        prev = idx[0]
-        for i in idx[1:]:
-            if i != prev + 1:
-                ax.axvspan(temps[start], temps[prev], alpha=alpha, color=color,
-                           label=label)
-                label = None
-                start = i
-            prev = i
-        ax.axvspan(temps[start], temps[prev], alpha=alpha, color=color, label=label)
 
-    shade(aus_mask,  "tab:blue",   0.08, "Off ")
-    shade(hyst_mask, "tab:orange", 0.18, "Hysterese")
-    shade(full_mask, "tab:red",    0.12, "Max")
+def main():
+    lambda_code = extract_control_lambda(YAML_PATH)
+    build_dir = Path(tempfile.mkdtemp(prefix="fan_sim_"))
+    lib = compile_lambda(lambda_code, build_dir)
+    print(f"Lambda extrahiert ({len(lambda_code.splitlines())} Zeilen), kompiliert: {lib}")
 
-    ax.plot(temps, warming_pct, color="#1f77b4", lw=2.4,
-            label="Warming")
-    ax.plot(temps, cooling_pct, color="#d62728", lw=2.4, ls="--",
-            label="Cooling")
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    nan = float("nan")
 
-    ax.set_xlabel("Temperature, max(DS18B20)  [°C]")
-    ax.set_ylabel("PWM-Steps [%]")
-    ax.set_title(
-        f"fan-curve from {yaml_path.name}  (target_temp = {t_target:.0f} °C)\n"
-    )
-    ax.set_xlim(temps[0], temps[-1])
-    ax.set_ylim(-5, 110)
-    ax.set_yticks(range(0, 101, 20))
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="lower right", framealpha=0.95)
+    # --- Szenario A: Delta-T-Regelung (Zuluft 22 C), Hysterese sichtbar ---
+    tin = 22.0
+    dt_up = np.arange(0.0, 14.01, 0.01)
+    dt_dn = dt_up[::-1]
+    c = Controller(lib)  # eine Instanz: erst hoch, dann runter (Hysterese)
+    up = sweep(c, tin + dt_up, tin)
+    dn = sweep(c, tin + dt_dn, tin)
+    ax1.plot(dt_up, up, label="steigend (Ein ≥ 4 K)", color="tab:red")
+    ax1.plot(dt_dn, dn, "--", label="fallend (Aus < 3 K)", color="tab:blue")
 
+    # Override-Demo: warme Zuluft (34 C) -> 38-C-Grenze greift schon bei ΔT = 4 K
+    c2 = Controller(lib)
+    ov = sweep(c2, 34.0 + dt_up, 34.0)
+    ax1.plot(dt_up, ov, ":", label="Zuluft 34 °C (Override ab 38 °C abs.)",
+             color="tab:orange")
+
+    ax1.set_title("Primär: ΔT-Regelung")
+    ax1.set_xlabel("ΔT = max(Rack) − Zuluft [K]")
+
+    # --- Szenario B: Fallback-Absolutkurve (Zuluftsensor = NaN) ---
+    t_up = np.arange(24.0, 42.01, 0.01)
+    t_dn = t_up[::-1]
+    cf = Controller(lib)
+    f_up = sweep(cf, t_up, nan)
+    f_dn = sweep(cf, t_dn, nan)
+    ax2.plot(t_up, f_up, label="steigend (Ein ≥ 28 °C)", color="tab:red")
+    ax2.plot(t_dn, f_dn, "--", label="fallend (Aus < 27 °C)", color="tab:blue")
+    ax2.axvline(38, color="gray", lw=0.8, ls=":")
+    ax2.text(38.2, 50, "Override 100 %", rotation=90, va="center", fontsize=8)
+
+    ax2.set_title("Fallback: Absolutkurve (Zuluftsensor NaN)")
+    ax2.set_xlabel("max(Rack Temp) [°C]")
+
+    for ax in (ax1, ax2):
+        ax.set_ylabel("PWM [%]")
+        ax.set_ylim(-5, 105)
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=8)
+
+    fig.suptitle("Rack-Monitor Lüfterkurve – simuliert aus der Original-YAML-Lambda")
     fig.tight_layout()
-    fig.savefig(outfile, dpi=150, bbox_inches="tight")
-    print(f"Plot gespeichert: {outfile}")
-
-
-# ============================================================================
-# Main
-# ============================================================================
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Simuliert die Luefterkurve aus der ESPHome-YAML, "
-                    "indem das Original-Lambda als C++ kompiliert und gegen "
-                    "einen Temperatur-Sweep ausgefuehrt wird."
-    )
-    parser.add_argument("--yaml", type=Path, default=Path("esphome/temperature-simulator/fan-curve.yaml"),
-                        help="Pfad zur YAML (auch rack-monitor.yaml moeglich). "
-                             "Default: fan_curve.yaml")
-    parser.add_argument("--target-temp", type=float, default=28.0,
-                        help="HA-Slider target_temp in °C (25..45). Default: 28")
-    parser.add_argument("--t-min", type=float, default=None,
-                        help="Untere Temperatur des Sweeps. Default: target_temp - 5")
-    parser.add_argument("--t-max", type=float, default=None,
-                        help="Obere Temperatur des Sweeps. Default: target_temp + 14")
-    parser.add_argument("--steps", type=int, default=1000,
-                        help="Anzahl Sweep-Punkte. Default: 1801 (~0.01 °C)")
-    parser.add_argument("-o", "--output", type=Path, default=Path("esphome/temperature-simulator/fan_curve.png"))
-    parser.add_argument("--show", action="store_true")
-    parser.add_argument("--keep-build", action="store_true",
-                        help="Build-Artefakte behalten (zur Inspektion)")
-    parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args()
-
-    if not args.yaml.exists():
-        raise SystemExit(f"YAML-Datei nicht gefunden: {args.yaml}")
-    if not 25.0 <= args.target_temp <= 45.0:
-        parser.error("--target-temp ausserhalb 25..45 °C (HA-Number-Range)")
-
-    t_min = args.t_min if args.t_min is not None else args.target_temp - 5.0
-    t_max = args.t_max if args.t_max is not None else args.target_temp + 14.0
-
-    lambda_body = extract_lambda(args.yaml)
-    n_lines = lambda_body.count("\n") + 1
-    print(f"Lambda extrahiert aus {args.yaml}: {n_lines} Zeilen")
-
-    if args.keep_build:
-        build_dir = Path(tempfile.mkdtemp(prefix="fan_curve_build_"))
-        print(f"Build-Verzeichnis: {build_dir}")
-        so = compile_lambda(lambda_body, build_dir, verbose=args.verbose)
-        _do_sweep_and_plot(LambdaSim(so), args, t_min, t_max)
-    else:
-        with tempfile.TemporaryDirectory(prefix="fan_curve_build_") as tmp:
-            so = compile_lambda(lambda_body, Path(tmp), verbose=args.verbose)
-            _do_sweep_and_plot(LambdaSim(so), args, t_min, t_max)
-
-
-def _do_sweep_and_plot(sim: LambdaSim, args: argparse.Namespace,
-                       t_min: float, t_max: float) -> None:
-    temps = np.linspace(t_min, t_max, args.steps)
-    warming = np.empty(args.steps, dtype=int)
-    cooling = np.empty(args.steps, dtype=int)
-
-    for i, t in enumerate(temps):
-        _, warming[i] = sim.step(float(t), float(t), args.target_temp,
-                                 fan_running=False)
-        _, cooling[i] = sim.step(float(t), float(t), args.target_temp,
-                                 fan_running=True, fan_pct=20)
-
-    plot(temps, warming, cooling, args.target_temp, args.output, args.yaml)
-    if args.show:
-        plt.show()
+    fig.savefig(PNG_PATH, dpi=150)
+    print(f"Plot gespeichert: {PNG_PATH.resolve()}")
 
 
 if __name__ == "__main__":
