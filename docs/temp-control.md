@@ -1,28 +1,38 @@
 # Temperature Control
 
-Automatic fan curve, evaluated every 20 s while `auto_mode` is on.
+Automatic fan curve, evaluated every 15 s while `auto_mode` is on. The controller writes to the fan **entities** (not the raw PWM outputs), so Home Assistant always shows the true on/off state and speed.
 
-**Control variable:** `max(temp_zone1, temp_zone2)` — the warmer DS18B20 sets the speed. BMP280 is display-only. If both sensors return NaN, no action is taken.
+**Control variable:** ΔT = `max(rack_temp_1, rack_temp_2) − intake_temp` — the warmer rack DS18B20 against the intake air reference. `fmaxf` is used, so one dead rack sensor does not block the control loop. If both rack sensors return NaN, no action is taken.
 
-**Curve** (`t_low` = `target_temp`, default 28 °C; `t_high` = `t_low + 10 °C`):
+**Primary curve (delta-T mode):**
 
-| Temperature | PWM |
+| ΔT | PWM |
 |---|---|
-| `< t_low − 1 °C` | 0 % |
-| `t_low − 1 .. t_low` | hysteresis: 0 % if previously off, 20 % if previously on |
-| `t_low .. t_high` | linear 20 → 100 % |
-| `≥ t_high` | 100 % |
+| `< 3 K` | 0 % |
+| `3 .. 4 K` | hysteresis: 0 % if previously off, 20 % if previously on |
+| `4 .. 12 K` | linear 20 → 100 % |
+| `≥ 12 K` | 100 % |
 
-The 1 K hysteresis prevents on/off flutter at the switching threshold.
+**Fallback (intake sensor NaN):** absolute curve on `max(rack_temp)` — on ≥ 28 °C, off < 27 °C (1 K hysteresis), linear 20 → 100 % across 28–38 °C.
 
-**HA entities:** `switch.luefter_automatik` (enable), `number.zieltemperatur` (`t_low`, 25–45 °C). With `auto_mode` off, the fan entities are controllable manually.
+**Override (safety net):** `max(rack_temp) ≥ 38 °C` forces 100 %, regardless of mode.
 
-**Source:** `interval: 20s → lambda` in `rack-monitor.yaml`.
+The 1 K hysteresis (in both modes) prevents on/off flutter at the switching threshold. All thresholds are hardcoded in the lambda.
 
-**Simulation:** `python3 fan_curve_plot.py [--yaml rack-monitor.yaml] [--target-temp 28]` — compiles the original lambda as C++ and sweeps a temperature range.
+**Manual override:** any manual fan interaction (HA card or web UI — on/off or speed) switches `auto_mode` off automatically. Changes made by the controller itself and the boot restore (first 10 s) are ignored. Re-enable via `switch.luefter_automatik`; the curve takes over on the next 15 s cycle.
+
+**HA entities:** `switch.luefter_automatik` (enable), `sensor.rack_delta_t` (ΔT, for tuning), `fan.luefter_1` / `fan.luefter_2` (manual control while `auto_mode` is off).
+
+**Source:** `interval: 15s → lambda` in `rack-monitor.yaml`.
 
 ## Simulated temperature control
 
-with the scripts provided in `esphome/temperature-simulator`, you can simulate the C++ code, which is embedded into the `rack-monitor.yaml`
+With the scripts provided in `esphome/temperature-simulator`, you can simulate the C++ code embedded in `rack-monitor.yaml`:
 
-<img src="../esphome/temperature-simulator/fan_curve.png" alt="aluprofil" width="70%"/>
+```
+python3 fan_curve_plot.py [path/to/rack-monitor.yaml]
+```
+
+The script extracts the original lambda from the YAML, compiles it with g++ (fan entities and hysteresis state are stubbed in a small harness), and sweeps ΔT up and down as well as the absolute fallback range — the YAML remains the single source of truth. Each scenario runs in an isolated controller instance so the hysteresis branches are visible in the plot.
+
+<img src="../esphome/temperature-simulator/fan_curve.png" alt="fan curve" width="70%"/>
