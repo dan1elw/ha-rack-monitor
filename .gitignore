@@ -4,3 +4,6 @@
 # freecad
 *.FCStd1
 *.FCStd2
+
+# python
+__pycache__/
