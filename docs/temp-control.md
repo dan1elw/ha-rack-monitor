@@ -27,7 +27,7 @@ The 1 K hysteresis (in both modes) prevents on/off flutter at the switching thre
 
 ## Simulated temperature control
 
-With the scripts provided in `esphome/temperature-simulator`, you can simulate the C++ code embedded in `rack-monitor.yaml`:
+With the scripts provided in `analysis/temperature-control-algo`, you can simulate the C++ code embedded in `rack-monitor.yaml`:
 
 ```
 python3 fan_curve_plot.py [path/to/rack-monitor.yaml]
@@ -35,4 +35,4 @@ python3 fan_curve_plot.py [path/to/rack-monitor.yaml]
 
 The script extracts the original lambda from the YAML, compiles it with g++ (fan entities and hysteresis state are stubbed in a small harness), and sweeps ΔT up and down as well as the absolute fallback range — the YAML remains the single source of truth. Each scenario runs in an isolated controller instance so the hysteresis branches are visible in the plot.
 
-<img src="../esphome/temperature-simulator/fan_curve.png" alt="fan curve" width="70%"/>
+<img src="../analysis/temperature-control-algo/fan_curve.png" alt="fan curve" width="70%"/>

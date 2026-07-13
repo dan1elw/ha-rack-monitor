@@ -33,7 +33,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 YAML_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("esphome/rack-monitor.yaml")
-PNG_PATH = Path("esphome/temperature-simulator/fan_curve.png")
+PNG_PATH = Path("analysis/temperature-control-algo/fan_curve.png")
 
 # ----------------------------------------------------------------------
 # 1. Lambda aus dem YAML extrahieren
