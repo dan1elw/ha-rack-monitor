@@ -14,6 +14,6 @@ I decided to build the rack itself with Aluminium Profiles with the size of `20 
 
 ## Design of the rack
 
-The rack is designed in FreeCAD. The files can be found here: `../hardware/cad-rack/`. The final rack has the outer dimensions (H, B, T): `330 mm`, `303 mm`, `300 mm`.
+The rack is designed in FreeCAD. The files can be found here: `../docs/cad-rack/`. The final rack has the outer dimensions (H, B, T): `330 mm`, `303 mm`, `300 mm`.
 
 <img src="../docs/pictures/rack_assembly.jpeg" alt="aluprofil" width="70%"/>
