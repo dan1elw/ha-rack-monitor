@@ -8,16 +8,16 @@ Automatic fan curve, evaluated every 15 s while `auto_mode` is on. The controlle
 
 | ΔT | PWM |
 |---|---|
-| `< 3 K` | 0 % |
-| `3 .. 4 K` | hysteresis: 0 % if previously off, 20 % if previously on |
-| `4 .. 12 K` | linear 20 → 100 % |
-| `≥ 12 K` | 100 % |
+| `< 9 °C` | 0 % |
+| `9 ..    10 °C` | hysteresis: 0 % if previously off, 10 % if previously on |
+| `10 .. 18 °C` | linear 10 → 100 % |
+| `≥ 18 °C` | 100 % |
 
-**Fallback (intake sensor NaN):** absolute curve on `max(rack_temp)` — on ≥ 28 °C, off < 27 °C (1 K hysteresis), linear 20 → 100 % across 28–38 °C.
+**Fallback (intake sensor NaN):** absolute curve on `max(rack_temp)` — on ≥ 35 °C, off < 34 °C (1 °C hysteresis), linear 10 → 100 % across 35-45 °C.
 
-**Override (safety net):** `max(rack_temp) ≥ 38 °C` forces 100 %, regardless of mode.
+**Override (safety net):** `max(rack_temp) ≥ 45 °C` forces 100 %, regardless of mode.
 
-The 1 K hysteresis (in both modes) prevents on/off flutter at the switching threshold. All thresholds are hardcoded in the lambda.
+The 1 °C hysteresis (in both modes) prevents on/off flutter at the switching threshold. All thresholds are hardcoded in the lambda.
 
 **Manual override:** any manual fan interaction (HA card or web UI — on/off or speed) switches `auto_mode` off automatically. Changes made by the controller itself and the boot restore (first 10 s) are ignored. Re-enable via `switch.luefter_automatik`; the curve takes over on the next 15 s cycle.
 
@@ -35,4 +35,6 @@ python3 fan_curve_plot.py [path/to/rack-monitor.yaml]
 
 The script extracts the original lambda from the YAML, compiles it with g++ (fan entities and hysteresis state are stubbed in a small harness), and sweeps ΔT up and down as well as the absolute fallback range — the YAML remains the single source of truth. Each scenario runs in an isolated controller instance so the hysteresis branches are visible in the plot.
 
-<img src="../analysis/temperature-control-algo/fan_curve.png" alt="fan curve" width="70%"/>
+<div style="text-align: center;">
+    <img src="../analysis/temperature-control-algo/fan_curve.svg" alt="fan curve" width="70%"/>
+</div>
