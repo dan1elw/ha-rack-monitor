@@ -34,5 +34,5 @@ The testresults can be seen in the following plot:
 There are mainly three major findings:
 
 1. The maximum Fan Speed at 100% is: **3030 rpm**
-2. The minimum Speed, where the fan is actually on is: **6 % with ~500 rpm** (The specification here is wrong, it is 0 rpm below or equal 5 % PWM)
+2. The minimum Speed, where the fan is actually on is: **6 % with ~500 rpm** (The specification is wrong at this point, it actually is "0 rpm below or equal 5 % PWM"). But when the fan is already ON and is step by step reduced in it's speed down to 2 %, the fan is still ON with ~399 rpm. This will not work, if you try to turn the fan ON with 2 %, it has to be ON before.
 3. The Speed is following a linear function: **rpm = 27 * pwm + 332**
