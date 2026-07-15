@@ -1,225 +1,195 @@
 #!/usr/bin/env python3
-#!/usr/bin/env python3
-"""
-fan_curve_plot.py - Simulator fuer die Rack-Monitor-Lueftersteuerung
-====================================================================
-Prinzip "Single Source of Truth":
-Die Regelungslogik wird NICHT in Python nachgebaut. Stattdessen wird
-die C++-Lambda direkt aus rack-monitor.yaml extrahiert, in einen
-Test-Harness eingebettet, mit g++ kompiliert und via ctypes aufgerufen.
-Aendert sich das YAML, aendert sich der Plot automatisch mit.
-
-Simulierte Logik (Variante C - Hybrid):
-  Primaer:   Delta-T-Regelung (Ein >= 4 K, Aus < 3 K, 20-100 % @ 4-12 K)
-  Fallback:  Absolutkurve bei totem Zuluftsensor (28-38 C)
-  Override:  >= 38 C absolut -> 100 %
-
-Nutzung:  python3 fan_curve_plot.py [pfad/zu/rack-monitor.yaml]
-Ausgabe:  fan_curve.png
-Benoetigt: g++, PyYAML, matplotlib, numpy
-"""
-
+# =============================================================
+# fan_curve_plot.py – Simulation der Lüfterkurve
+# Prinzip: Die Regel-Lambda wird unverändert aus rack-monitor.yaml
+# extrahiert, Substitutionen werden aufgelöst (wie beim ESPHome-
+# Build), der Code via g++ kompiliert und über ctypes aufgerufen.
+# Single Source of Truth bleibt die YAML.
+#
+# Abhängigkeiten: pyyaml, matplotlib, g++
+# =============================================================
+ 
 import ctypes
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
-
-import numpy as np
-import yaml
-import matplotlib
-matplotlib.use("Agg")
+ 
 import matplotlib.pyplot as plt
+import yaml
 
 YAML_PATH = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("esphome/rack-monitor.yaml")
-PNG_PATH = Path("analysis/temperature-control-algo/fan_curve.png")
+NAN = float("nan")
 
-# ----------------------------------------------------------------------
-# 1. Lambda aus dem YAML extrahieren
-# ----------------------------------------------------------------------
-
-class EsphomeLoader(yaml.SafeLoader):
-    """SafeLoader, der ESPHome-Tags (!secret, !include, ...) toleriert."""
-
-EsphomeLoader.add_multi_constructor("!", lambda loader, suffix, node: None)
-
-
-def extract_control_lambda(yaml_path: Path) -> str:
-    """Findet die Regelungs-Lambda im interval-Block (Kennung: make_call)."""
-    config = yaml.load(yaml_path.read_text(encoding="utf-8"), Loader=EsphomeLoader)
-    for entry in config.get("interval", []):
-        for action in entry.get("then", []):
-            code = action.get("lambda") if isinstance(action, dict) else None
-            if code and "make_call" in code:
-                return code
-    raise RuntimeError("Regelungs-Lambda (make_call) nicht im interval-Block gefunden")
-
-
-# ----------------------------------------------------------------------
-# 2. C++-Harness: stellt die ESPHome-Umgebung der Lambda nach
-# ----------------------------------------------------------------------
-
-HARNESS = r"""
-#include <cmath>
-#include <initializer_list>
-using std::isnan;
+# C++-Shim: mockt die ESPHome-Umgebung der Lambda
+SHIM = r'''
+#include <math.h>
+#include <algorithm>
+using std::max;
 
 template <typename T>
 static T clamp(T v, T lo, T hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
-struct Sensor { float state; };
-struct Switch { bool  state; };
+struct MockSensor { float state; };
+struct MockSwitch { bool state; };
+struct MockOutput { float level; void set_level(float v) { level = v; } };
 
-struct Fan;
-struct FanCall {
-    Fan *fan;
-    bool has_state = false, state = false;
-    bool has_speed = false;  int  speed = 0;
-    FanCall &set_state(bool s) { has_state = true; state = s; return *this; }
-    FanCall &set_speed(int  s) { has_speed = true; speed = s; return *this; }
+// --- Fan-Entity-Mock (ESPHome Fan-API: make_call/set_*/perform) ---
+struct MockFan;
+struct MockFanCall {
+    MockFan *f;
+    bool has_state = false, st = false;
+    bool has_speed = false; int sp = 0;
+    MockFanCall &set_state(bool s) { has_state = true; st = s; return *this; }
+    MockFanCall &set_speed(float s) { has_speed = true; sp = (int)lroundf(s); return *this; }
     void perform();
 };
-struct Fan {
+struct MockFan {
     bool state = false;
-    int  speed = 0;
-    FanCall make_call() { FanCall c; c.fan = this; return c; }
+    int speed = 0;          // 0..100 (speed_count-Default)
+    bool touched = false;   // wurde in diesem Zyklus geschrieben?
+    MockFanCall make_call() { return MockFanCall{this}; }
+    MockFanCall turn_on()  { auto c = make_call(); c.set_state(true);  return c; }
+    MockFanCall turn_off() { auto c = make_call(); c.set_state(false); return c; }
 };
-void FanCall::perform() {
-    if (has_state) fan->state = state;
-    if (has_speed) fan->speed = speed;
+void MockFanCall::perform() {
+    if (has_state) f->state = st;
+    if (has_speed) f->speed = sp;
+    f->touched = true;
 }
 
-// Nachbildung der im YAML referenzierten IDs
-static Sensor rack_temp_1, rack_temp_2, intake_temp;
-static Switch auto_mode;
-static bool   auto_writing = false;
-static Fan    fan1_obj, fan2_obj;
-static Fan   *fan1 = &fan1_obj, *fan2 = &fan2_obj;
+static MockSwitch auto_mode{true};
+static bool auto_writing = false;          // Global aus der YAML
+static MockSensor rack_temp_1, rack_temp_2, intake_temp;
+static MockOutput pwm_fan1, pwm_fan2;      // ungenutzt, schadet nicht
+static MockFan fan1_obj, fan2_obj;
+static MockFan *fan1 = &fan1_obj, *fan2 = &fan2_obj;
 
 #define id(x) (x)
 
-// --- Original-Lambda aus rack-monitor.yaml (unveraendert eingefuegt) ---
-static void run_control() {
-{LAMBDA_BODY}
+static void control_step() {
+__LAMBDA__
 }
-// -----------------------------------------------------------------------
 
-extern "C" void simulate(float t1, float t2, float tin, int auto_on,
-                         float *pwm_out, int *on_out) {
+extern "C" float simulate(float t1, float t2, float tin) {
     rack_temp_1.state = t1;
     rack_temp_2.state = t2;
     intake_temp.state = tin;
-    auto_mode.state   = auto_on != 0;
-    run_control();
-    *on_out  = fan1_obj.state ? 1 : 0;
-    *pwm_out = fan1_obj.state ? fan1_obj.speed / 100.0f : 0.0f;
+    fan1_obj.touched = false;
+    control_step();
+    if (!fan1_obj.touched) return -1.0f;   // Sentinel: keine Änderung
+    return fan1_obj.state ? fan1_obj.speed / 100.0f : 0.0f;
 }
-"""
+'''
 
-
-def compile_lambda(lambda_code: str, build_dir: Path) -> Path:
-    body = "\n".join("    " + line for line in lambda_code.splitlines())
-    src = build_dir / "harness.cpp"
-    src.write_text(HARNESS.replace("{LAMBDA_BODY}", body), encoding="utf-8")
-    lib = build_dir / "control.so"
+def load_yaml(path: Path) -> dict:
+    """YAML laden; ESPHome-Tags wie !secret werden ignoriert."""
+    class Loader(yaml.SafeLoader):
+        pass
+    Loader.add_multi_constructor("!", lambda loader, suffix, node: None)
+    return yaml.load(path.read_text(), Loader=Loader)
+ 
+ 
+def resolve_substitutions(code: str, subs: dict) -> str:
+    """${var}- und $var-Substitutionen wie ESPHome per Text ersetzen."""
+    for key, val in (subs or {}).items():
+        code = code.replace("${%s}" % key, str(val))
+        code = re.sub(r"\$%s\b" % re.escape(key), str(val), code)
+    return code
+ 
+ 
+def extract_control_lambda(cfg: dict) -> str:
+    """Die Regel-Lambda anhand des auto_mode-Zugriffs identifizieren."""
+    for entry in cfg.get("interval", []):
+        for action in entry.get("then", []):
+            if isinstance(action, dict) and "auto_mode" in str(action.get("lambda", "")):
+                return action["lambda"]
+    sys.exit("Regel-Lambda (auto_mode) nicht in der YAML gefunden.")
+ 
+ 
+def build_shared_lib(lambda_code: str) -> Path:
+    workdir = Path(tempfile.mkdtemp(prefix="fan_sim_"))
+    cpp = workdir / "shim.cpp"
+    so = workdir / "shim.so"
+    cpp.write_text(SHIM.replace("__LAMBDA__", lambda_code))
     subprocess.run(
-        ["g++", "-shared", "-fPIC", "-O2", "-o", str(lib), str(src)],
+        ["g++", "-shared", "-fPIC", "-O2", "-o", str(so), str(cpp)],
         check=True,
     )
+    return so
+ 
+ 
+def fresh_instance(so: Path):
+    """Eigene Kopie der Lib pro Szenario, damit `static bool fans_on`
+    definiert bei false startet (ctypes cacht identische Pfade)."""
+    inst = Path(tempfile.mkdtemp(prefix="fan_sim_")) / "inst.so"
+    shutil.copy(so, inst)
+    lib = ctypes.CDLL(str(inst))
+    lib.simulate.restype = ctypes.c_float
+    lib.simulate.argtypes = [ctypes.c_float] * 3
     return lib
-
-
-class Controller:
-    """Eine isolierte Instanz der Regelung (eigener Hysterese-Zustand).
-
-    Der Hysterese-Zustand lebt als static-Variable in der Lambda. Fuer
-    unabhaengige Szenarien wird die .so daher jeweils als eigene Kopie
-    geladen (frischer Zustand pro Instanz).
-    """
-
-    _counter = 0
-
-    def __init__(self, lib_path: Path):
-        Controller._counter += 1
-        copy = lib_path.with_name(f"control_{Controller._counter}.so")
-        shutil.copy(lib_path, copy)
-        self._lib = ctypes.CDLL(str(copy))
-        self._lib.simulate.argtypes = [
-            ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_int,
-            ctypes.POINTER(ctypes.c_float), ctypes.POINTER(ctypes.c_int),
-        ]
-
-    def step(self, t1, t2, tin, auto_on=True):
-        pwm = ctypes.c_float()
-        on = ctypes.c_int()
-        self._lib.simulate(t1, t2, tin, int(auto_on),
-                           ctypes.byref(pwm), ctypes.byref(on))
-        return pwm.value, bool(on.value)
-
-
-# ----------------------------------------------------------------------
-# 3. Szenarien und Plot
-# ----------------------------------------------------------------------
-
-def sweep(ctrl, rack_values, tin):
-    """Fuehrt die Regelung sequenziell aus (Hysterese-Zustand bleibt erhalten)."""
-    return np.array([ctrl.step(r, r - 0.5, tin)[0] * 100 for r in rack_values])
-
-
+ 
+ 
+def sweep(lib, points):
+    """points: Iterable aus (t1, t2, tin). Sentinel -1 -> None."""
+    out = []
+    for t1, t2, tin in points:
+        v = lib.simulate(t1, t2, tin)
+        out.append(None if v < 0 else v * 100.0)
+    return out
+ 
+ 
 def main():
-    lambda_code = extract_control_lambda(YAML_PATH)
-    build_dir = Path(tempfile.mkdtemp(prefix="fan_sim_"))
-    lib = compile_lambda(lambda_code, build_dir)
-    print(f"Lambda extrahiert ({len(lambda_code.splitlines())} Zeilen), kompiliert: {lib}")
-
+    cfg = load_yaml(YAML_PATH)
+    code = resolve_substitutions(extract_control_lambda(cfg),
+                                 cfg.get("substitutions"))
+    so = build_shared_lib(code)
+ 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-    nan = float("nan")
-
-    # --- Szenario A: Delta-T-Regelung (Zuluft 22 C), Hysterese sichtbar ---
-    tin = 22.0
-    dt_up = np.arange(0.0, 14.01, 0.01)
-    dt_dn = dt_up[::-1]
-    c = Controller(lib)  # eine Instanz: erst hoch, dann runter (Hysterese)
-    up = sweep(c, tin + dt_up, tin)
-    dn = sweep(c, tin + dt_dn, tin)
-    ax1.plot(dt_up, up, label="steigend (Ein ≥ 4 K)", color="tab:red")
-    ax1.plot(dt_dn, dn, "--", label="fallend (Aus < 3 K)", color="tab:blue")
-
-    # Override-Demo: warme Zuluft (34 C) -> 38-C-Grenze greift schon bei ΔT = 4 K
-    c2 = Controller(lib)
-    ov = sweep(c2, 34.0 + dt_up, 34.0)
-    ax1.plot(dt_up, ov, ":", label="Zuluft 34 °C (Override ab 38 °C abs.)",
-             color="tab:orange")
-
-    ax1.set_title("Primär: ΔT-Regelung")
-    ax1.set_xlabel("ΔT = max(Rack) − Zuluft [K]")
-
-    # --- Szenario B: Fallback-Absolutkurve (Zuluftsensor = NaN) ---
-    t_up = np.arange(24.0, 42.01, 0.01)
-    t_dn = t_up[::-1]
-    cf = Controller(lib)
-    f_up = sweep(cf, t_up, nan)
-    f_dn = sweep(cf, t_dn, nan)
-    ax2.plot(t_up, f_up, label="steigend (Ein ≥ 28 °C)", color="tab:red")
-    ax2.plot(t_dn, f_dn, "--", label="fallend (Aus < 27 °C)", color="tab:blue")
-    ax2.axvline(38, color="gray", lw=0.8, ls=":")
-    ax2.text(38.2, 50, "Override 100 %", rotation=90, va="center", fontsize=8)
-
-    ax2.set_title("Fallback: Absolutkurve (Zuluftsensor NaN)")
-    ax2.set_xlabel("max(Rack Temp) [°C]")
-
-    for ax in (ax1, ax2):
-        ax.set_ylabel("PWM [%]")
-        ax.set_ylim(-5, 105)
-        ax.grid(True, alpha=0.3)
-        ax.legend(fontsize=8)
-
-    fig.suptitle("Rack-Monitor Lüfterkurve – simuliert aus der Original-YAML-Lambda")
+    
+    # --- Szenario 1: Delta-T-Kurve mit Hysterese (Intake fix 22 °C) ---
+    tin = 20.0
+    dts = [i / 100 for i in range(0, ((25-0)*100+1))]  # 0 .. 25 K
+    lib = fresh_instance(so)  # eine Instanz: Hysterese soll wirken
+    up = sweep(lib, ((tin + dt, tin + dt - 1.0, tin) for dt in dts))
+    down = sweep(lib, ((tin + dt, tin + dt - 1.0, tin) for dt in reversed(dts)))
+    ax1.plot(dts, up, label="ΔT aufsteigend", color="blue")
+    ax1.plot(list(reversed(dts)), down, "--", label="ΔT absteigend (Hysterese)", color="red")
+    ax1.set_title("Delta-T-Regelung (Intake 20 °C)")
+    ax1.set_xlabel("ΔT Rack − Intake [°C]")
+    ax1.set_ylabel("PWM [%]")
+    ax1.set_ylim(-5, 105)
+    ax1.set_xlim(5, 20)
+    ax1.grid(True, alpha=0.3)
+    ax1.legend(loc="upper left")
+ 
+    # --- Szenario 2: Absolut-Override und Sensor-Fallback ---
+    racks = [21 + i / 100 for i in range(0, ((50-20)*100+1))]  # 20 .. 50 °C
+    for tin2, style, lbl, col in [
+        (20.0, "-", "Intake 20 °C", "blue"),
+        (30.0, "-", "Intake 30 °C", "red"),
+        (NAN, ":", "Intake ausgefallen (Fallback)", "green"),
+    ]:
+        lib = fresh_instance(so)  # frische Instanz je Kurve
+        vals = sweep(lib, ((r, r, tin2) for r in racks))
+        ax2.plot(racks, vals, style, label=lbl, color=col)
+    ax2.axvline(45.0, color="grey", lw=0.8)
+    ax2.text(45.5, 5, "Override 45 °C", fontsize=8, color="grey", rotation=90)
+    ax2.set_title("Absoluttemperatur: Override & Fallback")
+    ax2.set_xlabel("Rack-Temperatur (max) [°C]")
+    ax2.set_ylabel("PWM [%]")
+    ax2.set_ylim(-5, 105)
+    ax2.set_xlim(25, 50)
+    ax2.grid(True, alpha=0.3)
+    ax2.legend(loc="upper left")
+ 
     fig.tight_layout()
-    fig.savefig(PNG_PATH, dpi=150)
-    print(f"Plot gespeichert: {PNG_PATH.resolve()}")
-
-
+    fig.savefig("analysis/temperature-control-algo/fan_curve.svg", dpi=150)
+    print("Plot gespeichert: fan_curve.svg")
+    plt.show()
+ 
+ 
 if __name__ == "__main__":
     main()

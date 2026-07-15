@@ -1,7 +1,7 @@
 # =============================================================
 # ha-rack-monitor (c) dan1elw
 # https://github.com/dan1elw/ha-rack-monitor
-# version 1.1
+# version 1.2
 # =============================================================
 # Rack-Controller – ESP32-WROOM-32 DevKitC (38-Pin)
 # Temperaturüberwachung (DS18B20) + PWM-Lüftersteuerung (Delta-T)
@@ -91,7 +91,7 @@ sensor:
   - platform: template
     name: "Rack Delta T"
     id: rack_delta_t
-    unit_of_measurement: "K"
+    unit_of_measurement: "°C"
     accuracy_decimals: 1
     update_interval: 15s
     lambda: |-
@@ -206,13 +206,19 @@ switch:
     internal: true
     restore_mode: ALWAYS_OFF
  
+# ---------- Variablen ----------
+substitutions:
+  dt_on: "10.0"       # Delta-T Einschaltschwelle in °C
+  dt_max: "18.0"      # Delta-T fuer 100 % PWM in °C
+  t_override: "45.0"  # Absoluttemperatur fuer 100 % PWM
+
 # ---------- Regelung ----------
 # Variante C – Hybrid:
-#   Primär:   ΔT-Regelung   Ein >= 4 K, Aus < 3 K (1 K Hysterese),
-#             linear 20–100 % im Bereich 4–12 K
-#   Fallback: Absolutkurve  Ein >= 28 °C, Aus < 27 °C,
-#             linear 20–100 % im Bereich 28–38 °C (falls Zuluftsensor NaN)
-#   Override: >= 38 °C absolut -> fest 100 % (Sicherheitsnetz)
+#   Primär:   ΔT-Regelung   Ein >= 10 °C, Aus < 9 °C (1 °C Hysterese),
+#             linear 10–100 % im Bereich 10-20 °C
+#   Fallback: Absolutkurve  Ein >= 35 °C, Aus < 34 °C,
+#             linear 10–100 % im Bereich 35-45 °C (falls Zuluftsensor NaN)
+#   Override: >= 45 °C absolut -> fest 100 % (Sicherheitsnetz)
 interval:
   - interval: 15s
     then:
@@ -226,22 +232,27 @@ interval:
  
           static bool fans_on = false;
           float pwm = 0.0f;
- 
+
           if (!isnan(tin)) {
+            // Primär: Delta-T-Regelung
             float dt = rack - tin;
-            if (fans_on ? (dt > 3.0f) : (dt >= 4.0f)) {
-              pwm = 0.2f + 0.8f * (dt - 4.0f) / 8.0f;
+            const float DT_ON = ${dt_on};
+            const float DT_OFF = DT_ON - 1.0f;   // 1 °C Hysterese
+            const float DT_MAX = ${dt_max};
+            if (fans_on ? (dt > DT_OFF) : (dt >= DT_ON)) {
+              pwm = 0.1f + 0.9f * (dt - DT_ON) / (DT_MAX - DT_ON);
             }
           } else {
-            if (fans_on ? (rack > 27.0f) : (rack >= 28.0f)) {
-              pwm = 0.2f + 0.8f * (rack - 28.0f) / 10.0f;
+            if (fans_on ? (rack > 34.0f) : (rack >= 35.0f)) {
+              pwm = 0.1f + 0.9f * (rack - 35.0f) / 10.0f;
             }
           }
- 
-          if (rack >= 38.0f) pwm = 1.0f;
+
+          const float T_OVERRIDE = ${t_override};
+          if (rack >= T_OVERRIDE) pwm = 1.0f;
  
           fans_on = pwm > 0.0f;
-          pwm = fans_on ? clamp(pwm, 0.2f, 1.0f) : 0.0f;
+          pwm = fans_on ? clamp(pwm, 0.1f, 1.0f) : 0.0f;
  
           // Steuerung über die Fan-Entitäten -> HA zeigt korrekten Zustand.
           // auto_writing verhindert, dass die eigenen Zugriffe den
