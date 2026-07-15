@@ -55,9 +55,15 @@ web_server:
  
 # ---------- Globale Variablen ----------
 globals:
-  # true, während die Automatik die Fan-Entitäten schreibt
+  # true, während die Automatik/Modus-Logik die Fan-Entitäten schreibt
   # -> verhindert, dass sie ihren eigenen manuellen Override auslöst
   - id: auto_writing
+    type: bool
+    initial_value: 'false'
+ 
+  # true, während die Firmware den Modus-Select selbst umstellt
+  # (z. B. manuelle Bedienung -> "On"); unterdrückt die on_value-Aktion
+  - id: mode_syncing
     type: bool
     initial_value: 'false'
  
@@ -152,13 +158,13 @@ output:
     id: pwm_fan2
  
 # ---------- Lüfter-Entitäten ----------
-# Automatik steuert AUSSCHLIESSLICH über diese Entitäten (make_call),
+# Modus-Logik steuert AUSSCHLIESSLICH über diese Entitäten (make_call),
 # nie direkt über die Outputs -> HA-Zustand bleibt immer synchron.
 # RESTORE_DEFAULT_ON: nach Stromausfall sicherer Zustand (Lüfter an),
-# Automatik übernimmt spätestens nach 15 s.
-# Manueller Override: jede manuelle Bedienung (HA/Web) deaktiviert die
-# Automatik. Ignoriert werden Automatik-Zugriffe (auto_writing) und der
-# Boot-Restore (erste 10 s).
+# Modus "Auto" übernimmt spätestens nach 15 s.
+# Manueller Override: jede manuelle Bedienung (HA/Web) schaltet den
+# Modus auf "On" (= manuelle Steuerung). Ignoriert werden Zugriffe der
+# Firmware selbst (auto_writing) und der Boot-Restore (erste 10 s).
 fan:
   - platform: speed
     output: pwm_fan1
@@ -167,13 +173,13 @@ fan:
     restore_mode: RESTORE_DEFAULT_ON
     on_turn_on:
       - lambda: |-
-          if (!id(auto_writing) && millis() > 10000) id(auto_mode).turn_off();
+          if (!id(auto_writing) && millis() > 10000) id(set_mode_manual)->execute();
     on_turn_off:
       - lambda: |-
-          if (!id(auto_writing) && millis() > 10000) id(auto_mode).turn_off();
+          if (!id(auto_writing) && millis() > 10000) id(set_mode_manual)->execute();
     on_speed_set:
       - lambda: |-
-          if (!id(auto_writing) && millis() > 10000) id(auto_mode).turn_off();
+          if (!id(auto_writing) && millis() > 10000) id(set_mode_manual)->execute();
  
   - platform: speed
     output: pwm_fan2
@@ -182,23 +188,82 @@ fan:
     restore_mode: RESTORE_DEFAULT_ON
     on_turn_on:
       - lambda: |-
-          if (!id(auto_writing) && millis() > 10000) id(auto_mode).turn_off();
+          if (!id(auto_writing) && millis() > 10000) id(set_mode_manual)->execute();
     on_turn_off:
       - lambda: |-
-          if (!id(auto_writing) && millis() > 10000) id(auto_mode).turn_off();
+          if (!id(auto_writing) && millis() > 10000) id(set_mode_manual)->execute();
     on_speed_set:
       - lambda: |-
-          if (!id(auto_writing) && millis() > 10000) id(auto_mode).turn_off();
+          if (!id(auto_writing) && millis() > 10000) id(set_mode_manual)->execute();
+ 
+# ---------- Skripte ----------
+script:
+  # Manuelle Bedienung erkannt -> Modus auf "On" (manuell) stellen,
+  # ohne dass die on_value-Aktion des Selects die Lüfter anfasst.
+  - id: set_mode_manual
+    then:
+      - lambda: |-
+          if (id(fan_mode).state == "On") return;
+          id(mode_syncing) = true;
+          auto call = id(fan_mode).make_call();
+          call.set_option("On");
+          call.perform();
+          id(mode_syncing) = false;
+ 
+# ---------- Modus-Auswahl ----------
+# Off  : beide Lüfter aus
+# On   : manuelle Steuerung – Lüfter an, Drehzahl frei via HA/Web
+# Auto : Regelkurve (Variante C, siehe unten)
+# 25/50/100 % : feste Drehzahl
+# restore_value: false + initial_option -> nach JEDEM Boot
+# (Stromausfall wie OTA-Neustart) startet der Modus mit "Auto".
+select:
+  - platform: template
+    name: "Luefter Modus"
+    id: fan_mode
+    icon: mdi:fan-auto
+    optimistic: true
+    restore_value: false
+    initial_option: "Auto"
+    options:
+      - "Off"
+      - "On"
+      - "Auto"
+      - "25%"
+      - "50%"
+      - "100%"
+    on_value:
+      - lambda: |-
+          // Firmware-interner Sync (manueller Override) -> nichts tun
+          if (id(mode_syncing)) return;
+          // Auto: Regelkurve übernimmt im 15-s-Intervall
+          if (x == "Auto") return;
+ 
+          float pwm = -1.0f;               // -1 = "On": Drehzahl unangetastet
+          if (x == "Off")       pwm = 0.0f;
+          else if (x == "25%")  pwm = 0.25f;
+          else if (x == "50%")  pwm = 0.50f;
+          else if (x == "100%") pwm = 1.0f;
+ 
+          id(auto_writing) = true;
+          for (auto *f : {id(fan1), id(fan2)}) {
+            auto call = f->make_call();
+            if (pwm == 0.0f) {
+              call.set_state(false);
+            } else if (pwm > 0.0f) {
+              call.set_state(true);
+              call.set_speed((int) roundf(pwm * 100.0f));
+            } else {
+              // "On": einschalten, letzte Drehzahl behalten
+              call.set_state(true);
+              if (f->speed == 0) call.set_speed(50);  // Fallback statt 0 %
+            }
+            call.perform();
+          }
+          id(auto_writing) = false;
  
 # ---------- Schalter ----------
 switch:
-  # Automatik AN = Lüfterkurve aktiv; AUS = manuelle Steuerung via HA
-  - platform: template
-    name: "Luefter Automatik"
-    id: auto_mode
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_ON
- 
   # Status-LED (intern, nicht in HA sichtbar)
   - platform: gpio
     pin: GPIO13
@@ -211,28 +276,46 @@ substitutions:
   dt_on: "10.0"       # Delta-T Einschaltschwelle in °C
   dt_max: "18.0"      # Delta-T fuer 100 % PWM in °C
   t_override: "45.0"  # Absoluttemperatur fuer 100 % PWM
-
+ 
 # ---------- Regelung ----------
-# Variante C – Hybrid:
+# Variante C – Hybrid (nur im Modus "Auto"):
 #   Primär:   ΔT-Regelung   Ein >= 10 °C, Aus < 9 °C (1 °C Hysterese),
 #             linear 10–100 % im Bereich 10-20 °C
 #   Fallback: Absolutkurve  Ein >= 35 °C, Aus < 34 °C,
 #             linear 10–100 % im Bereich 35-45 °C (falls Zuluftsensor NaN)
-#   Override: >= 45 °C absolut -> fest 100 % (Sicherheitsnetz)
+# Sicherheits-Override (JEDER Modus, auch Off/On/Manuell):
+#   >= 45 °C absolut -> fest 100 % (Sicherheitsnetz)
 interval:
   - interval: 15s
     then:
       - lambda: |-
-          if (!id(auto_mode).state) return;
- 
           // fmaxf ignoriert NaN: ein toter Rack-Sensor blockiert die Regelung nicht
           float rack = fmaxf(id(rack_temp_1).state, id(rack_temp_2).state);
+ 
+          // ---- Sicherheitsnetz: modusunabhängig ----
+          const float T_OVERRIDE = ${t_override};
+          if (!isnan(rack) && rack >= T_OVERRIDE) {
+            id(auto_writing) = true;
+            for (auto *f : {id(fan1), id(fan2)}) {
+              auto call = f->make_call();
+              call.set_state(true);
+              call.set_speed(100);
+              call.perform();
+            }
+            id(auto_writing) = false;
+            return;
+          }
+ 
+          // ---- Regelkurve nur im Modus "Auto" ----
+          if (id(fan_mode).state != "Auto") return;
           if (isnan(rack)) return;  // beide Rack-Sensoren tot: letzter Zustand bleibt
           float tin = id(intake_temp).state;
  
-          static bool fans_on = false;
+          // Hysterese aus realem Entitäten-Zustand (self-syncing,
+          // kein static -> robust bei Moduswechseln)
+          bool fans_on = id(fan1).state;
           float pwm = 0.0f;
-
+ 
           if (!isnan(tin)) {
             // Primär: Delta-T-Regelung
             float dt = rack - tin;
@@ -247,9 +330,6 @@ interval:
               pwm = 0.1f + 0.9f * (rack - 35.0f) / 10.0f;
             }
           }
-
-          const float T_OVERRIDE = ${t_override};
-          if (rack >= T_OVERRIDE) pwm = 1.0f;
  
           fans_on = pwm > 0.0f;
           pwm = fans_on ? clamp(pwm, 0.1f, 1.0f) : 0.0f;
@@ -270,7 +350,7 @@ interval:
           }
           id(auto_writing) = false;
  
-  # LED: blinkt = kein WLAN, an = Automatik aktiv, aus = manuell
+  # LED: blinkt = kein WLAN, an = Modus Auto, aus = manuell
   - interval: 500ms
     then:
       - if:
@@ -282,7 +362,7 @@ interval:
           else:
             - if:
                 condition:
-                  switch.is_on: auto_mode
+                  lambda: 'return id(fan_mode).state == "Auto";'
                 then:
                   - switch.turn_on: led_status_gruen
                 else:
@@ -302,3 +382,4 @@ text_sensor:
 button:
   - platform: restart
     name: "Rack Monitor Neustart"
+ 
