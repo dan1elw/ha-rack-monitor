@@ -4,6 +4,10 @@ Minimalist Lovelace card for the `ha-rack-monitor` project: three temperature
 tiles, two fan rows (RPM · PWM %), an online badge with last update, and an
 optional mode bar bound to the firmware's mode select.
 
+<div style="text-align: center;">
+    <img src="rack-monitor-card.png" width="70%"/>
+</div>
+
 ## Installation (HACS)
 
 1. HACS → Custom repositories → add this repository as type **Dashboard**.
