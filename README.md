@@ -5,7 +5,7 @@ ESP32-based temperature monitoring and fan control for a homelab rack, fully int
 The controller measures rack and intake air temperatures and drives two PWM fans along a delta-T fan curve — cooling scales with the actual heat load instead of a fixed schedule. All sensors and controls are exposed as native Home Assistant entities.
 
 <div style="text-align: center;">
-    <img src="./docs/control-logic/rack_esp32_schaltplan.drawio.svg" width="70%"/>
+    <img src="./docs/control-logic/esp32_rack-monitor.drawio.svg" width="70%"/>
 </div>
 
 ## Features
