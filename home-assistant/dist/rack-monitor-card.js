@@ -7,7 +7,7 @@ const t=globalThis,e=t.ShadowRoot&&(void 0===t.ShadyCSS||t.ShadyCSS.nativeShadow
             @click=${()=>this._moreInfo(this._config.status_entity)}
           >
             <span class="dot ${t?"online":"offline"}"></span>
-            ${e?D`<ha-relative-time
+            ${!t&&e?D`<ha-relative-time
                   .hass=${this.hass}
                   .datetime=${e}
                 ></ha-relative-time>`:q}
@@ -237,4 +237,4 @@ const t=globalThis,e=t.ShadowRoot&&(void 0===t.ShadyCSS||t.ShadyCSS.nativeShadow
     ha-form {
       display: block;
     }
-  `}customElements.define("rack-monitor-card-editor",ft),window.customCards=window.customCards||[],window.customCards.push({type:ct,name:lt,description:"Minimalist rack temperature and fan monitoring with mode control",preview:!0,documentationURL:"https://github.com/dan1elw/ha-rack-monitor"}),console.info(`%c ${lt} %c v1.3.0 `,"background: #1e2226; color: #e8eaed; font-weight: 600; border-radius: 4px 0 0 4px; padding: 2px 6px;","background: #5b8fc7; color: #ffffff; border-radius: 0 4px 4px 0; padding: 2px 6px;");
+  `}customElements.define("rack-monitor-card-editor",ft),window.customCards=window.customCards||[],window.customCards.push({type:ct,name:lt,description:"Minimalist rack temperature and fan monitoring with mode control",preview:!0,documentationURL:"https://github.com/dan1elw/ha-rack-monitor"}),console.info(`%c ${lt} %c v1.4.0 `,"background: #1e2226; color: #e8eaed; font-weight: 600; border-radius: 4px 0 0 4px; padding: 2px 6px;","background: #5b8fc7; color: #ffffff; border-radius: 0 4px 4px 0; padding: 2px 6px;");

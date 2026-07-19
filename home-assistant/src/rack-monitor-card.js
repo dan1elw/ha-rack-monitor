@@ -149,7 +149,7 @@ export class RackMonitorCard extends LitElement {
             @click=${() => this._moreInfo(this._config.status_entity)}
           >
             <span class="dot ${online ? "online" : "offline"}"></span>
-            ${lastUpdated
+            ${!online && lastUpdated
               ? html`<ha-relative-time
                   .hass=${this.hass}
                   .datetime=${lastUpdated}
