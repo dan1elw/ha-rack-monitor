@@ -7,3 +7,7 @@
 
 # python
 __pycache__/
+
+# home-assistant
+home-assistant/node_modules/
+home-assistant/dist/
