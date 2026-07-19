@@ -1,0 +1,19 @@
+{
+  "name": "rack-monitor-card",
+  "version": "1.0.0",
+  "description": "Minimalist Home Assistant card for the ha-rack-monitor project",
+  "type": "module",
+  "scripts": {
+    "build": "rollup -c",
+    "watch": "rollup -c -w"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "lit": "^3.2.1"
+  },
+  "devDependencies": {
+    "@rollup/plugin-node-resolve": "^16.0.0",
+    "@rollup/plugin-terser": "^0.4.4",
+    "rollup": "^4.30.0"
+  }
+}
