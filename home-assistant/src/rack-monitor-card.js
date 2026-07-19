@@ -113,6 +113,18 @@ export class RackMonitorCard extends LitElement {
     });
   }
 
+  /* Open the standard HA more-info dialog (state, history, attributes) */
+  _moreInfo(entityId) {
+    if (!entityId) return;
+    this.dispatchEvent(
+      new CustomEvent("hass-more-info", {
+        detail: { entityId },
+        bubbles: true,
+        composed: true,
+      })
+    );
+  }
+
   _label(key, fallback) {
     const custom = this._config?.[`${key.replace("_entity", "")}_name`];
     if (custom) return custom;
@@ -132,7 +144,10 @@ export class RackMonitorCard extends LitElement {
       <ha-card>
         <div class="header">
           <span class="title">${this._config.title ?? "Rack Monitor"}</span>
-          <span class="status">
+          <span
+            class="status ${this._config.status_entity ? "clickable" : ""}"
+            @click=${() => this._moreInfo(this._config.status_entity)}
+          >
             <span class="dot ${online ? "online" : "offline"}"></span>
             ${lastUpdated
               ? html`<ha-relative-time
@@ -150,8 +165,12 @@ export class RackMonitorCard extends LitElement {
         </div>
 
         ${this._hasFans() ? html`<div class="divider"></div>` : nothing}
-        ${this._renderFan("fan1_entity", "fan1_rpm_entity", "Fan 1")}
-        ${this._renderFan("fan2_entity", "fan2_rpm_entity", "Fan 2")}
+        ${this._hasFans()
+          ? html`<div class="fans">
+              ${this._renderFan("fan1_entity", "fan1_rpm_entity", "Fan 1")}
+              ${this._renderFan("fan2_entity", "fan2_rpm_entity", "Fan 2")}
+            </div>`
+          : nothing}
 
         ${modeObj ? this._renderModes(modeObj, online) : nothing}
       </ha-card>
@@ -165,7 +184,13 @@ export class RackMonitorCard extends LitElement {
   _renderTemp(key, fallbackLabel) {
     const obj = this._stateObj(key);
     return html`
-      <div class="temp ${this._available(obj) ? "" : "unavailable"}">
+      <div
+        class="temp clickable ${this._available(obj) ? "" : "unavailable"}"
+        role="button"
+        tabindex="0"
+        @click=${() => this._moreInfo(this._config[key])}
+        @keydown=${(e) => e.key === "Enter" && this._moreInfo(this._config[key])}
+      >
         <span class="label">${this._label(key, fallbackLabel)}</span>
         <span class="value">
           ${this._temp(obj)}<span class="unit">${this._unit(obj)}</span>
@@ -178,13 +203,28 @@ export class RackMonitorCard extends LitElement {
     if (!this._config[fanKey] && !this._config[rpmKey]) return nothing;
     const fanObj = this._stateObj(fanKey);
     const rpmObj = this._stateObj(rpmKey);
+    /* Tile click targets the RPM sensor (history focus), falls back to the fan entity */
+    const target = this._config[rpmKey] || this._config[fanKey];
     return html`
-      <div class="fan-row">
-        <span class="fan-label">${this._label(fanKey, fallbackLabel)}</span>
+      <div
+        class="fan clickable"
+        role="button"
+        tabindex="0"
+        @click=${() => this._moreInfo(target)}
+        @keydown=${(e) => e.key === "Enter" && this._moreInfo(target)}
+      >
+        <span class="label">${this._label(fanKey, fallbackLabel)}</span>
         <span class="fan-value">
           ${this._rpm(rpmObj)} RPM
           ${fanObj
-            ? html`<span class="fan-pwm">· ${this._pwm(fanObj)} %</span>`
+            ? html`<span
+                class="fan-pwm"
+                @click=${(e) => {
+                  e.stopPropagation();
+                  this._moreInfo(this._config[fanKey]);
+                }}
+                >· ${this._pwm(fanObj)} %</span
+              >`
             : nothing}
         </span>
       </div>
@@ -287,19 +327,38 @@ export class RackMonitorCard extends LitElement {
       border-top: 1px solid var(--divider-color);
     }
 
-    /* fans */
-    .fan-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+    /* clickable areas: hover feedback without shifting the layout */
+    .clickable {
+      cursor: pointer;
+      border-radius: 8px;
+      margin: -6px;
+      padding: 6px;
+      transition: background 120ms ease;
     }
-    .fan-label {
-      font-size: 13px;
+    .clickable:hover,
+    .clickable:focus-visible {
+      background: var(--secondary-background-color);
+      outline: none;
+    }
+    .fan-pwm:hover {
       color: var(--primary-text-color);
     }
+
+    /* fans: two tiles side by side, mirroring the temperature grid */
+    .fans {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+    .fan {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
     .fan-value {
-      font-size: 14px;
+      font-size: 15px;
       font-weight: 500;
+      line-height: 1.2;
       color: var(--primary-text-color);
     }
     .fan-pwm {
