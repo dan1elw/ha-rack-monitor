@@ -2,9 +2,11 @@ import "./rack-monitor/card.js";
 import "./rack-monitor/editor.js";
 import "./host-monitor/card.js";
 import "./host-monitor/editor.js";
+import "./truenas-monitor/card.js";
+import "./truenas-monitor/editor.js";
 import { CARD_VERSION } from "./const.js";
 
-/* Register both cards with the Lovelace card picker */
+/* Register all cards with the Lovelace card picker */
 window.customCards = window.customCards || [];
 window.customCards.push(
   {
@@ -18,6 +20,13 @@ window.customCards.push(
     type: "host-monitor-card",
     name: "Host Monitor Card",
     description: "Minimalist host monitoring: CPU, RAM, temperature, uptime and disk",
+    preview: true,
+    documentationURL: "https://github.com/dan1elw/ha-rack-monitor",
+  },
+  {
+    type: "truenas-monitor-card",
+    name: "TrueNAS Monitor Card",
+    description: "Minimalist NAS monitoring: pool capacity, status, alerts and scrub",
     preview: true,
     documentationURL: "https://github.com/dan1elw/ha-rack-monitor",
   }

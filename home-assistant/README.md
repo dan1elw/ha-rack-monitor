@@ -15,6 +15,7 @@ optional mode bar bound to the firmware's mode select.
 <div style="text-align: center;">
     <img src="card-rack-monitor.png" width="50%"/>
     <img src="card-host-monitor.png" width="50%"/>
+    <img src="card-truenas-monitor.png" width="50%"/>
 </div>
 
 ## Installation (HACS)
