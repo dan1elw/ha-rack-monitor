@@ -60,6 +60,23 @@ const SCHEMA = [
       },
     ],
   },
+  {
+    name: "thresholds",
+    type: "expandable",
+    flatten: true,
+    schema: [
+      {
+        name: "",
+        type: "grid",
+        schema: [
+          { name: "temp_warn", selector: { number: { min: 0, max: 120, mode: "box", unit_of_measurement: "°C" } } },
+          { name: "temp_crit", selector: { number: { min: 0, max: 120, mode: "box", unit_of_measurement: "°C" } } },
+          { name: "temp_min", selector: { number: { min: 0, max: 120, mode: "box", unit_of_measurement: "°C" } } },
+          { name: "temp_max", selector: { number: { min: 0, max: 120, mode: "box", unit_of_measurement: "°C" } } },
+        ],
+      },
+    ],
+  },
 ];
 
 const LABELS = {
@@ -76,6 +93,11 @@ const LABELS = {
   fan2_rpm_entity: "Fan 2 RPM sensor",
   mode_entity: "Mode select",
   status_entity: "Status (connectivity)",
+  thresholds: "Thresholds",
+  temp_warn: "Temp warn",
+  temp_crit: "Temp critical",
+  temp_min: "Temp bar scale min",
+  temp_max: "Temp bar scale max",
 };
 
 const HELPERS = {

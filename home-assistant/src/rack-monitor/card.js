@@ -13,6 +13,15 @@ const STATE_KEYS = [
   "mode_entity",
 ];
 
+/* Bar scale and thresholds aligned with the firmware fan curve
+   (absolute override 38 °C, safety override 45 °C); overridable via config */
+const DEFAULTS = {
+  temp_min: 20,
+  temp_max: 50,
+  temp_warn: 38,
+  temp_crit: 45,
+};
+
 export class RackMonitorCard extends LitElement {
   static properties = {
     hass: { attribute: false },
@@ -23,7 +32,7 @@ export class RackMonitorCard extends LitElement {
     if (!config.zone1_entity || !config.zone2_entity || !config.intake_entity) {
       throw new Error("rack-monitor-card: zone1_entity, zone2_entity and intake_entity are required");
     }
-    this._config = config;
+    this._config = { ...DEFAULTS, ...config };
   }
 
   static getConfigElement() {
@@ -161,8 +170,20 @@ export class RackMonitorCard extends LitElement {
     return this._config.fan1_entity || this._config.fan2_entity;
   }
 
+  _tempSeverity(value) {
+    if (!Number.isFinite(value)) return "ok";
+    if (value >= this._config.temp_crit) return "crit";
+    if (value >= this._config.temp_warn) return "warn";
+    return "ok";
+  }
+
   _renderTemp(key, fallbackLabel) {
     const obj = this._stateObj(key);
+    const value = parseFloat(obj?.state);
+    const { temp_min, temp_max } = this._config;
+    const fraction = Number.isFinite(value)
+      ? (value - temp_min) / (temp_max - temp_min)
+      : 0;
     return html`
       <div
         class="tile clickable ${isAvailable(obj) ? "" : "unavailable"}"
@@ -175,6 +196,12 @@ export class RackMonitorCard extends LitElement {
         <span class="value">
           ${this._temp(obj)}<span class="unit">${this._unit(obj)}</span>
         </span>
+        <div class="bar">
+          <div
+            class="bar-fill ${this._tempSeverity(value)}"
+            style="width: ${Math.max(0, Math.min(100, fraction * 100))}%"
+          ></div>
+        </div>
       </div>
     `;
   }

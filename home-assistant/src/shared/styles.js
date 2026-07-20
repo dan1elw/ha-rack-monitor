@@ -99,4 +99,27 @@ export const sharedStyles = css`
     background: var(--secondary-background-color);
     outline: none;
   }
+
+  /* slim load/threshold bars */
+  .bar {
+    margin-top: 4px;
+    height: 3px;
+    border-radius: 1.5px;
+    background: var(--secondary-background-color);
+    overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%;
+    border-radius: 1.5px;
+    transition: width 300ms ease, background 300ms ease;
+  }
+  .bar-fill.ok {
+    background: var(--primary-color);
+  }
+  .bar-fill.warn {
+    background: var(--warning-color, #e5a33b);
+  }
+  .bar-fill.crit {
+    background: var(--error-color, #db4437);
+  }
 `;

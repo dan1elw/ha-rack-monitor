@@ -253,32 +253,7 @@ export class HostMonitorCard extends LitElement {
     });
   }
 
-  static styles = [
-    sharedStyles,
-    css`
-      .bar {
-        margin-top: 4px;
-        height: 3px;
-        border-radius: 1.5px;
-        background: var(--secondary-background-color);
-        overflow: hidden;
-      }
-      .bar-fill {
-        height: 100%;
-        border-radius: 1.5px;
-        transition: width 300ms ease, background 300ms ease;
-      }
-      .bar-fill.ok {
-        background: var(--primary-color);
-      }
-      .bar-fill.warn {
-        background: var(--warning-color, #e5a33b);
-      }
-      .bar-fill.crit {
-        background: var(--error-color, #db4437);
-      }
-    `,
-  ];
+  static styles = [sharedStyles];
 }
 
 customElements.define("host-monitor-card", HostMonitorCard);

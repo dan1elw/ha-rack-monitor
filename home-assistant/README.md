@@ -13,7 +13,8 @@ optional mode bar bound to the firmware's mode select.
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=dan1elw&repository=ha-rack-monitor&category=Integration)
 
 <div style="text-align: center;">
-    <img src="rack-monitor-card.png" width="70%"/>
+    <img src="card-rack-monitor.png" width="50%"/>
+    <img src="card-host-monitor.png" width="50%"/>
 </div>
 
 ## Installation (HACS)
