@@ -1,4 +1,5 @@
 import { LitElement, html, css, nothing } from "lit";
+import { fireConfigChanged, pruneConfig } from "../shared/helpers.js";
 
 /*
  * Guided setup: ha-form renders native entity pickers, filtered by
@@ -99,18 +100,7 @@ export class RackMonitorCardEditor extends LitElement {
 
   _valueChanged(ev) {
     ev.stopPropagation();
-    const config = { ...ev.detail.value };
-    /* Drop empty keys to keep the YAML clean */
-    for (const key of Object.keys(config)) {
-      if (config[key] === "" || config[key] === undefined) delete config[key];
-    }
-    this.dispatchEvent(
-      new CustomEvent("config-changed", {
-        detail: { config },
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireConfigChanged(this, pruneConfig(ev.detail.value));
   }
 
   render() {
