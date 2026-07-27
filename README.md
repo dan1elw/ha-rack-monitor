@@ -1,17 +1,17 @@
 # ha-rack-monitor
 
-ESP32-based temperature monitoring and fan control for a homelab rack, fully integrated into Home Assistant via ESPHome.
+<div align="center">
+    <img src="./docs/logo/rack-monitor-logo-white.svg" width="50%" alt="Rack Monitor logo"/>
+</div>
+
+ESP32-based temperature monitoring and fan control for a ⁰-inch homelab rack, fully integrated into Home Assistant via ESPHome.
 
 The controller measures rack and intake air temperatures and drives two PWM fans along a delta-T fan curve — cooling scales with the actual heat load instead of a fixed schedule. All sensors and controls are exposed as native Home Assistant entities.
-
-<div style="text-align: center;">
-    <img src="./docs/logo/rack-monitor-logo-white.svg" width="50%"/>
-</div>
 
 ## Features
 
 - Temperature monitoring of two rack zones plus intake air reference
-- Automatic delta-T based fan control with hysteresis and a safety override
+- Automatic fan control with hysteresis and a safety override
 - Manual mode: any manual fan interaction pauses the automation
 - Fan speed (RPM) monitoring per fan
 - OTA updates, web interface for direct diagnostics, status LED
