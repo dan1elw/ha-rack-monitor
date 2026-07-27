@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 190" width="300" height="190">
+  <g transform="translate(150,70)">
+    <circle r="34" fill="none" stroke="#1f2126" stroke-width="5" stroke-linecap="round" stroke-dasharray="68.1 145.5"></circle>
+    <circle r="21" fill="none" stroke="#1f2126" stroke-width="5" stroke-linecap="round" stroke-dasharray="44.4 87.5" transform="rotate(150)"></circle>
+    <circle r="5.5" fill="#e08a3c"></circle>
+  </g>
+  <text x="150" y="150" text-anchor="middle" font-family="&#39;IBM Plex Mono&#39;, monospace" font-weight="700" font-size="32" fill="#1f2126" letter-spacing="0.3">Rack Monitor</text>
+</svg>
