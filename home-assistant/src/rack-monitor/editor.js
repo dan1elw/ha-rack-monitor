@@ -1,4 +1,5 @@
 import { LitElement, html, css, nothing } from "lit";
+import { fireConfigChanged, pruneConfig } from "../shared/helpers.js";
 
 /*
  * Guided setup: ha-form renders native entity pickers, filtered by
@@ -59,6 +60,23 @@ const SCHEMA = [
       },
     ],
   },
+  {
+    name: "thresholds",
+    type: "expandable",
+    flatten: true,
+    schema: [
+      {
+        name: "",
+        type: "grid",
+        schema: [
+          { name: "temp_warn", selector: { number: { min: 0, max: 120, mode: "box", unit_of_measurement: "°C" } } },
+          { name: "temp_crit", selector: { number: { min: 0, max: 120, mode: "box", unit_of_measurement: "°C" } } },
+          { name: "temp_min", selector: { number: { min: 0, max: 120, mode: "box", unit_of_measurement: "°C" } } },
+          { name: "temp_max", selector: { number: { min: 0, max: 120, mode: "box", unit_of_measurement: "°C" } } },
+        ],
+      },
+    ],
+  },
 ];
 
 const LABELS = {
@@ -75,6 +93,11 @@ const LABELS = {
   fan2_rpm_entity: "Fan 2 RPM sensor",
   mode_entity: "Mode select",
   status_entity: "Status (connectivity)",
+  thresholds: "Thresholds",
+  temp_warn: "Temp warn",
+  temp_crit: "Temp critical",
+  temp_min: "Temp bar scale min",
+  temp_max: "Temp bar scale max",
 };
 
 const HELPERS = {
@@ -99,18 +122,7 @@ export class RackMonitorCardEditor extends LitElement {
 
   _valueChanged(ev) {
     ev.stopPropagation();
-    const config = { ...ev.detail.value };
-    /* Drop empty keys to keep the YAML clean */
-    for (const key of Object.keys(config)) {
-      if (config[key] === "" || config[key] === undefined) delete config[key];
-    }
-    this.dispatchEvent(
-      new CustomEvent("config-changed", {
-        detail: { config },
-        bubbles: true,
-        composed: true,
-      })
-    );
+    fireConfigChanged(this, pruneConfig(ev.detail.value));
   }
 
   render() {

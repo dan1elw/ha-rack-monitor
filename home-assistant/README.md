@@ -1,11 +1,21 @@
 # Rack Monitor Card
 
+[![GitHub Release](https://img.shields.io/github/v/release/dan1elw/ha-rack-monitor?sort=semver&style=for-the-badge&color=green)](https://github.com/dan1elw/ha-rack-monitor/releases/)
+[![GitHub Release Date](https://img.shields.io/github/release-date/dan1elw/ha-rack-monitor?style=for-the-badge&color=green)](https://github.com/dan1elw/ha-rack-monitor/releases/)
+![GitHub Downloads (all assets, latest release)](https://img.shields.io/github/downloads/dan1elw/ha-rack-monitor/latest/total?style=for-the-badge&label=Downloads%20latest%20Release)
+![GitHub commit activity](https://img.shields.io/github/commit-activity/m/dan1elw/ha-rack-monitor?style=for-the-badge)
+[![hacs](https://img.shields.io/badge/HACS-Integration-blue.svg?style=for-the-badge)](https://github.com/hacs/integration)
+
 Minimalist Lovelace card for the `ha-rack-monitor` project: three temperature
 tiles, two fan rows (RPM · PWM %), an online badge with last update, and an
 optional mode bar bound to the firmware's mode select.
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=dan1elw&repository=ha-rack-monitor&category=Integration)
+
 <div style="text-align: center;">
-    <img src="rack-monitor-card.png" width="70%"/>
+    <img src="card-rack-monitor.png" width="50%"/>
+    <img src="card-host-monitor.png" width="50%"/>
+    <img src="card-truenas-monitor.png" width="50%"/>
 </div>
 
 ## Installation (HACS)

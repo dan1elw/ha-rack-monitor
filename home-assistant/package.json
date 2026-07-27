@@ -1,6 +1,6 @@
 {
   "name": "rack-monitor-card",
-  "version": "1.4.0",
+  "version": "2.2.0",
   "description": "Minimalist Home Assistant card for the ha-rack-monitor project",
   "type": "module",
   "scripts": {
