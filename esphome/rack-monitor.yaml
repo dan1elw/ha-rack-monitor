@@ -34,7 +34,7 @@ logger:
 # (nicht in secrets.yaml auslagern).
 api:
   encryption:
-    key: "HIER_VOM_ASSISTENTEN_GENERIERTEN_KEY_EINFUEGEN"
+    key: !secret api_encryption_key # hier den generierten key einfügen
  
 ota:
   - platform: esphome
