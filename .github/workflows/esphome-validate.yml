@@ -36,7 +36,7 @@ jobs:
           cfg = pathlib.Path("esphome/rack-monitor.yaml").read_text()
           names = sorted(set(re.findall(r"!secret\s+([\w-]+)", cfg)))
           key = base64.b64encode(b"\x00" * 32).decode()  # valid 32-byte API key
-          out = [f'{n}: "{key if "key" in n.lower() else "stub"}"' for n in names]
+          out = [f'{n}: "{key if "key" in n.lower() else "stubvalue"}"' for n in names]
           pathlib.Path("esphome/secrets.yaml").write_text("\n".join(out) + "\n")
           print("Stubbed:", names or "none")
           PY
