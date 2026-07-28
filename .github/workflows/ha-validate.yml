@@ -1,0 +1,23 @@
+name: ha-validate
+
+on: # yamllint disable-line rule:truthy
+  pull_request:
+    branches:
+      - main
+      - github-actions
+      - feat/*
+
+jobs:
+  hacs: # https://github.com/hacs/action
+    name: HACS
+    runs-on: ubuntu-latest
+    concurrency:
+      group: hacs-${{ github.head_ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+      - name: Run HACS validation
+        uses: hacs/action@main # official ref, not versioned
+        with:
+          category: plugin
