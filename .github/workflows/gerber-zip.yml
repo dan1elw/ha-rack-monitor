@@ -17,7 +17,7 @@ jobs:
 
       - name: Create ZIP archive
         run: |
-          zip -r gerber-rack-monitor.zip docs/pcb/gerber
+          zip -j gerber-rack-monitor.zip docs/pcb/gerber
 
       - name: Upload ZIP to release
         uses: softprops/action-gh-release@v2
