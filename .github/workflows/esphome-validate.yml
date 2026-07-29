@@ -1,0 +1,46 @@
+name: esphome-validate
+
+on:  # yamllint disable-line rule:truthy
+  pull_request:
+    branches:
+      - main
+      - github-actions
+      - feat/*
+    paths:
+      - "esphome/**"
+      - ".github/workflows/esphome-validate.yml"
+
+jobs:
+  config:
+    name: Config validation
+    runs-on: ubuntu-latest
+    concurrency:
+      group: esphome-config-${{ github.head_ref }}
+      cancel-in-progress: true
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ESPHome
+        run: pip install esphome
+
+      - name: Generate stub secrets  # esphome config fails on unresolved !secret refs
+        run: |
+          python3 <<'PY'
+          import re, base64, pathlib
+          cfg = pathlib.Path("esphome/rack-monitor.yaml").read_text()
+          names = sorted(set(re.findall(r"!secret\s+([\w-]+)", cfg)))
+          key = base64.b64encode(b"\x00" * 32).decode()  # valid 32-byte API key
+          out = [f'{n}: "{key if "key" in n.lower() else "stubvalue"}"' for n in names]
+          pathlib.Path("esphome/secrets.yaml").write_text("\n".join(out) + "\n")
+          print("Stubbed:", names or "none")
+          PY
+          cat esphome/secrets.yaml
+
+      - name: Validate configuration  # schema + substitutions only; does not compile lambdas
+        run: esphome config esphome/rack-monitor.yaml
