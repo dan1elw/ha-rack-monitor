@@ -27,10 +27,29 @@ Track sizes are defined by current. In the existing setup we have: (1) ESP32 wit
 | 5V | 0.8mm |
 | 3V3, Data, etc. | 0.3mm |
 
-## final PCB
-
-In the following picture you can see the final PCB (remark: only the top layer is shown). The respecitve gerber-file (zip archive) contains all the related data for production.
+In the following picture you can see the final PCB (remark: only the top layer is shown).
 
 <div align="center">
     <img src="board_rack-monitor.svg" width="70%"/>
 </div>
+
+## Production
+
+A **Gerber** file is a standard file format used to tell a PCB manufacturer how to make a printed circuit board (PCB). It contains layout data for each PCB layer, such as: copper traces, solder masks, markings, board outline, holes, etc...
+
+A typical PCB oder includes multiple Gerber files (one per layer) plus drill files for holes. The manufacturer uses them to fabricate and assemble the board. For this project you can find all related gerber-files in `docs/pcb/gerber/`. The zipped version is attached to the latest release: [ha-rack-monitor/releases/latest](https://github.com/dan1elw/ha-rack-monitor/releases/latest).
+
+The design is done with EasyEDA. The [gerber-files](https://docs.easyeda.com/en/PCB/Gerber-Generate/) are generated inside this tool. They contain the following files:
+
+| file | description | used for production |
+| ---- | ----------- | ------------------- |
+| Drill_NPTH_Through.DRL | contains drill hole positions that does not need metallization on the inner wall, such as through holes | yes |
+| Drill_PTH_Trough_Via.DRL | contains drill hole positions that needs metallization on the inner wall, for JLCPCB use only | yes |
+| Drill_PTH_Through.DRL | contains drill hole positions that needs metallization on the inner wall, such as multi-layer pads | yes |
+| Gerber_BoardOutlineLayer.GKO | contains the board shape for cutting the PCB board | yes |
+| Gerber_BottomLayer.GBL | bottom copper foil layer | yes |
+| Gerber_BottomSolderMaskLayer.GBS | the board is covered with oil by default, the elements drawn in this layer correspond to the areas on bottom layer without oil | yes |
+| Gerber_DocumentLayer.GDL | record PCB remarks | no |
+| Gerber_TopLayer.GTL | top copper foil layer | yes |
+| Gerber_TopSilkscreenLayer.GTO | top silkscreen layer | yes |
+| Gerber_TopSolderMaskLayer.GTS | the board is covered with oil by default, the elements drawn in this layer correspond to the areas on top layer without oil | yes |

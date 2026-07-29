@@ -1,0 +1,27 @@
+name: Gerber release zip
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  zip-folder:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create ZIP archive
+        run: |
+          zip -j gerber-rack-monitor-${{ github.event.release.tag_name }}.zip docs/pcb/gerber/*
+
+      - name: Upload ZIP to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: gerber-rack-monitor-${{ github.event.release.tag_name }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
