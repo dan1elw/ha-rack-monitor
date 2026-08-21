@@ -1,6 +1,6 @@
 G04 Layer: TopSilkscreenLayer*
 G04 EasyEDA v6.5.57, 2026-08-21 14:04:48*
-G04 21a24ddf59d74a2ebcaba67e444f0a9e,73b71592eb5d450092b712373c5d4a3f,10*
+G04 6babd1ff1e854c829ccbb43ea7f903ec,73b71592eb5d450092b712373c5d4a3f,10*
 G04 Gerber Generator version 0.2*
 G04 Scale: 100 percent, Rotated: No, Reflected: No *
 G04 Dimensions in millimeters *
@@ -13,7 +13,7 @@ G04 leading zeros omitted , absolute positions ,4 integer and 5 decimal *
 %ADD12C,0.2540*%
 %ADD13C,0.2032*%
 %ADD14C,0.1270*%
-%ADD15C,0.0193*%
+%ADD15C,0.0196*%
 
 %LPD*%
 G36*
