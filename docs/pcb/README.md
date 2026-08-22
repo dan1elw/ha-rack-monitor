@@ -55,7 +55,7 @@ The design is done with EasyEDA. The [gerber-files](https://docs.easyeda.com/en/
 | Drill_PTH_Through.DRL | contains drill hole positions that needs metallization on the inner wall, such as multi-layer pads | yes |
 | Gerber_BoardOutlineLayer.GKO | contains the board shape for cutting the PCB board | yes |
 | Gerber_BottomLayer.GBL | bottom copper foil layer | yes |
-| Gerber_BottomSilkscreenLayer.GTO | bottom silkscreen layer | yes |
+| Gerber_BottomSilkscreenLayer.GBO | bottom silkscreen layer | yes |
 | Gerber_BottomSolderMaskLayer.GBS | the board is covered with oil by default, the elements drawn in this layer correspond to the areas on bottom layer without oil | yes |
 | Gerber_DocumentLayer.GDL | record PCB remarks | no |
 | Gerber_TopLayer.GTL | top copper foil layer | yes |
