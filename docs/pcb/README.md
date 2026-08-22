@@ -12,25 +12,32 @@ The schematic drawing shows all connections and parts. It serves as a baseline f
 
 ## PCB-Design
 
-By designing the PCB, you place all components on the board and perform the wiring. The board has a size of `120x70mm`. For each part, you first need to define the related footprint, which is in some cases very specific, measure your existing HW-components carefully!
+By designing the PCB, you place all components on the board and perform the wiring. The board has a size of `80x65mm`. For each part, you first need to define the related footprint, which is in some cases very specific, measure your existing HW-components carefully! In the following pictures you can see (1) top / front side and (2) bottom / back side of the PCB-board.
 
 <div align="center">
-    <img src="pcb_rack-monitor.svg" width="70%"/>
+    <img src="pcb-front_rack-monitor.svg" width="70%"/>
+    <img src="pcb-back_rack-monitor.svg" width="70%"/>
 </div>
 
 Track sizes are defined by current. In the existing setup we have: (1) ESP32 with 250mA (and up to 500mA during Startup) (2) LED's with ~ 150mA (3) temperature sensors with max. 5mA in total (4) the two PWM fans with up to 600 mA and even higher during startup. In total we expect 1.2 - 2 A. To allow these ammount of current, the track sizes are set as follows:
 
-| net | width |
-| --- | ----- |
-| GND | 2mm |
-| 12V | 2mm |
-| 5V | 0.8mm |
-| 3V3, Data, etc. | 0.3mm |
+| net | width | clearance |
+| --- | ----- | --------- |
+| GND | 2mm | 0.4mm |
+| 12V | 2mm | 0.2mm |
+| 5V | 0.8mm | 0.2mm |
+| 3V3, Data, etc. | 0.3mm | 0.2mm |
 
-In the following picture you can see the final PCB (remark: only the top layer is shown).
+The GND is realized as GND-Planes on top and vorrom side instead of tracks. This allows good flow and reduces noise. In the following picture you can see the final PCB (remark: only the top layer is shown).
 
 <div align="center">
-    <img src="board_rack-monitor.svg" width="70%"/>
+    <img src="final-board_rack-monitor.svg" width="70%"/>
+</div>
+
+And the 3D-Model with components:
+
+<div align="center">
+    <img src="final-board_3d-model.png" width="70%"/>
 </div>
 
 ## Production
@@ -48,6 +55,7 @@ The design is done with EasyEDA. The [gerber-files](https://docs.easyeda.com/en/
 | Drill_PTH_Through.DRL | contains drill hole positions that needs metallization on the inner wall, such as multi-layer pads | yes |
 | Gerber_BoardOutlineLayer.GKO | contains the board shape for cutting the PCB board | yes |
 | Gerber_BottomLayer.GBL | bottom copper foil layer | yes |
+| Gerber_BottomSilkscreenLayer.GTO | bottom silkscreen layer | yes |
 | Gerber_BottomSolderMaskLayer.GBS | the board is covered with oil by default, the elements drawn in this layer correspond to the areas on bottom layer without oil | yes |
 | Gerber_DocumentLayer.GDL | record PCB remarks | no |
 | Gerber_TopLayer.GTL | top copper foil layer | yes |
