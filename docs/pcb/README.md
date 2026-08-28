@@ -40,7 +40,7 @@ And the 3D-Model with components:
     <img src="final-board_3d-model.png" width="70%"/>
 </div>
 
-## Production
+## PCB Production
 
 A **Gerber** file is a standard file format used to tell a PCB manufacturer how to make a printed circuit board (PCB). It contains layout data for each PCB layer, such as: copper traces, solder masks, markings, board outline, holes, etc...
 
@@ -61,3 +61,12 @@ The design is done with EasyEDA. The [gerber-files](https://docs.easyeda.com/en/
 | Gerber_TopLayer.GTL | top copper foil layer | yes |
 | Gerber_TopSilkscreenLayer.GTO | top silkscreen layer | yes |
 | Gerber_TopSolderMaskLayer.GTS | the board is covered with oil by default, the elements drawn in this layer correspond to the areas on top layer without oil | yes |
+
+## PCBA (PCB Assembly)
+
+A **PCBA** is a PCB (Printed Circuit Board) with electronic components mounted and soldered onto it. The PCB provides the electrical connections and mechanical support, while the components provide the actual functions of the circuit.
+
+SMD stands for Surface-Mount Device. SMD components are electronic components designed to be mounted directly onto the surface of a PCB, rather than inserted through holes. Common SMD components include: Resistors, Capacitors, Diodes, ICs (integrated circuits), Transistors
+
+In simple terms:
+PCB = the board → SMD components = components mounted on the board → PCBA = the finished board with components assembled.
