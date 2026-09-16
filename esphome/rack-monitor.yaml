@@ -1,7 +1,7 @@
 # =============================================================
 # ha-rack-monitor (c) dan1elw
 # https://github.com/dan1elw/ha-rack-monitor
-# version 1.2
+# version 1.3
 # =============================================================
 # Rack-Controller – ESP32-WROOM-32 DevKitC (38-Pin)
 # Temperaturüberwachung (DS18B20) + PWM-Lüftersteuerung (Delta-T)
@@ -9,7 +9,9 @@
 # =============================================================
 # Pinbelegung:
 #   GPIO4   1-Wire-Bus DS18B20 (4,7 kΩ Pull-up extern)
-#   GPIO13  Status-LED grün (220 Ω)
+#   GPIO12  Status-LED gelbgrün (2,2 kΩ Vorwiderstand gegen GND)
+#           Strapping-Pin (MTDI): muss beim Boot LOW sein
+#           -> kein Pull-up an diesem Pin zulässig
 #   GPIO21  I²C SDA – reserviert (Sensor noch nicht konfiguriert)
 #   GPIO22  I²C SCL – reserviert
 #   GPIO25  PWM Lüfter 1 (25 kHz, via Level-Shifter)
@@ -17,42 +19,42 @@
 #   GPIO32  Tacho Lüfter 1 (10 kΩ Pull-up extern)
 #   GPIO33  Tacho Lüfter 2 (10 kΩ Pull-up extern)
 # =============================================================
- 
+
 esphome:
   name: rack-monitor
   friendly_name: Rack Monitor
- 
+
 esp32:
   board: esp32dev
   framework:
     type: arduino
- 
+
 logger:
- 
+
 # ---------- Konnektivität ----------
 # API-Key ist gerätespezifisch und bleibt bewusst inline
 # (nicht in secrets.yaml auslagern).
 api:
   encryption:
     key: !secret api_encryption_key # hier den generierten key einfügen
- 
+
 ota:
   - platform: esphome
     password: !secret ota_password
- 
+
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   ap:
-    ssid: "Rack-Monitor Fallback"
+    ssid: Rack-Monitor-Fallback
     password: !secret fallback_password
- 
+
 captive_portal:
- 
+
 # Weboberfläche zur Direktdiagnose: http://<IP>
 web_server:
   port: 80
- 
+
 # ---------- Globale Variablen ----------
 globals:
   # true, während die Automatik/Modus-Logik die Fan-Entitäten schreibt
@@ -60,18 +62,18 @@ globals:
   - id: auto_writing
     type: bool
     initial_value: 'false'
- 
+
   # true, während die Firmware den Modus-Select selbst umstellt
   # (z. B. manuelle Bedienung -> "On"); unterdrückt die on_value-Aktion
   - id: mode_syncing
     type: bool
     initial_value: 'false'
- 
+
 # ---------- Busse ----------
 one_wire:
   - platform: gpio
     pin: GPIO4
- 
+
 # ---------- Sensoren ----------
 sensor:
   # DS18B20 – feste ROM-Adressen verhindern Entitäten-Tausch nach Reboot
@@ -80,19 +82,19 @@ sensor:
     id: rack_temp_1
     name: "Rack Temp 1"
     update_interval: 15s
- 
+
   - platform: dallas_temp
     address: 0x9a0000006bd8df28
     id: rack_temp_2
     name: "Rack Temp 2"
     update_interval: 15s
- 
+
   - platform: dallas_temp
     address: 0x990000006bf7c528
     id: intake_temp
     name: "Intake Temp"
     update_interval: 15s
- 
+
   # Regelgröße: ΔT = heißester Rack-Sensor − Zuluft (für HA-Tuning sichtbar)
   - platform: template
     name: "Rack Delta T"
@@ -104,7 +106,7 @@ sensor:
       float rack = fmaxf(id(rack_temp_1).state, id(rack_temp_2).state);
       if (isnan(rack) || isnan(id(intake_temp).state)) return NAN;
       return rack - id(intake_temp).state;
- 
+
   # Tacho: Arctic P12 Pro = 2 Impulse/Umdrehung -> Faktor 0,5
   - platform: pulse_counter
     pin:
@@ -117,7 +119,7 @@ sensor:
     filters:
       - multiply: 0.5
     update_interval: 10s
- 
+
   - platform: pulse_counter
     pin:
       number: GPIO33
@@ -129,21 +131,21 @@ sensor:
     filters:
       - multiply: 0.5
     update_interval: 10s
- 
+
   # ---------- Diagnose ----------
   - platform: uptime
     name: "Uptime"
     update_interval: 60s
- 
+
   - platform: wifi_signal
     name: "WiFi Signal"
     update_interval: 60s
- 
+
   # Chip-Temperatur des ESP32 (nicht Rack-Temperatur)
   - platform: internal_temperature
     name: "ESP32 Temperatur"
     update_interval: 60s
- 
+
 # ---------- PWM-Ausgänge ----------
 # 25 kHz gemäß Intel-4-Pin-Spezifikation (Arctic P12 Pro: 21–28 kHz)
 output:
@@ -151,12 +153,12 @@ output:
     pin: GPIO25
     frequency: 25000 Hz
     id: pwm_fan1
- 
+
   - platform: ledc
     pin: GPIO26
     frequency: 25000 Hz
     id: pwm_fan2
- 
+
 # ---------- Lüfter-Entitäten ----------
 # Modus-Logik steuert AUSSCHLIESSLICH über diese Entitäten (make_call),
 # nie direkt über die Outputs -> HA-Zustand bleibt immer synchron.
@@ -180,7 +182,7 @@ fan:
     on_speed_set:
       - lambda: |-
           if (!id(auto_writing) && millis() > 10000) id(set_mode_manual)->execute();
- 
+
   - platform: speed
     output: pwm_fan2
     name: "Luefter 2"
@@ -195,21 +197,22 @@ fan:
     on_speed_set:
       - lambda: |-
           if (!id(auto_writing) && millis() > 10000) id(set_mode_manual)->execute();
- 
+
 # ---------- Skripte ----------
 script:
   # Manuelle Bedienung erkannt -> Modus auf "On" (manuell) stellen,
   # ohne dass die on_value-Aktion des Selects die Lüfter anfasst.
+  # current_option() liefert StringRef (ESPHome >= 2026.7, .state entfernt)
   - id: set_mode_manual
     then:
       - lambda: |-
-          if (id(fan_mode).state == "On") return;
+          if (id(fan_mode).current_option() == "On") return;
           id(mode_syncing) = true;
           auto call = id(fan_mode).make_call();
           call.set_option("On");
           call.perform();
           id(mode_syncing) = false;
- 
+
 # ---------- Modus-Auswahl ----------
 # Off  : beide Lüfter aus
 # On   : manuelle Steuerung – Lüfter an, Drehzahl frei via HA/Web
@@ -238,13 +241,13 @@ select:
           if (id(mode_syncing)) return;
           // Auto: Regelkurve übernimmt im 15-s-Intervall
           if (x == "Auto") return;
- 
+
           float pwm = -1.0f;               // -1 = "On": Drehzahl unangetastet
           if (x == "Off")       pwm = 0.0f;
           else if (x == "25%")  pwm = 0.25f;
           else if (x == "50%")  pwm = 0.50f;
           else if (x == "100%") pwm = 1.0f;
- 
+
           id(auto_writing) = true;
           for (auto *f : {id(fan1), id(fan2)}) {
             auto call = f->make_call();
@@ -261,22 +264,26 @@ select:
             call.perform();
           }
           id(auto_writing) = false;
- 
+
 # ---------- Schalter ----------
 switch:
   # Status-LED (intern, nicht in HA sichtbar)
+  # GPIO12 ist Strapping-Pin (Flash-Spannung). Beschaltung
+  # GPIO12 -> 2,2 kΩ -> LED -> GND zieht nur Richtung LOW -> bootsicher.
   - platform: gpio
-    pin: GPIO13
+    pin:
+      number: GPIO12
+      ignore_strapping_warning: true
     id: led_status_gruen
     internal: true
     restore_mode: ALWAYS_OFF
- 
+
 # ---------- Variablen ----------
 substitutions:
   dt_on: "10.0"       # Delta-T Einschaltschwelle in °C
   dt_max: "18.0"      # Delta-T fuer 100 % PWM in °C
   t_override: "45.0"  # Absoluttemperatur fuer 100 % PWM
- 
+
 # ---------- Regelung ----------
 # Variante C – Hybrid (nur im Modus "Auto"):
 #   Primär:   ΔT-Regelung   Ein >= 10 °C, Aus < 9 °C (1 °C Hysterese),
@@ -291,7 +298,7 @@ interval:
       - lambda: |-
           // fmaxf ignoriert NaN: ein toter Rack-Sensor blockiert die Regelung nicht
           float rack = fmaxf(id(rack_temp_1).state, id(rack_temp_2).state);
- 
+
           // ---- Sicherheitsnetz: modusunabhängig ----
           const float T_OVERRIDE = ${t_override};
           if (!isnan(rack) && rack >= T_OVERRIDE) {
@@ -305,17 +312,17 @@ interval:
             id(auto_writing) = false;
             return;
           }
- 
+
           // ---- Regelkurve nur im Modus "Auto" ----
-          if (id(fan_mode).state != "Auto") return;
+          if (id(fan_mode).current_option() != "Auto") return;
           if (isnan(rack)) return;  // beide Rack-Sensoren tot: letzter Zustand bleibt
           float tin = id(intake_temp).state;
- 
+
           // Hysterese aus realem Entitäten-Zustand (self-syncing,
           // kein static -> robust bei Moduswechseln)
           bool fans_on = id(fan1).state;
           float pwm = 0.0f;
- 
+
           if (!isnan(tin)) {
             // Primär: Delta-T-Regelung
             float dt = rack - tin;
@@ -330,10 +337,10 @@ interval:
               pwm = 0.1f + 0.9f * (rack - 35.0f) / 10.0f;
             }
           }
- 
+
           fans_on = pwm > 0.0f;
           pwm = fans_on ? clamp(pwm, 0.1f, 1.0f) : 0.0f;
- 
+
           // Steuerung über die Fan-Entitäten -> HA zeigt korrekten Zustand.
           // auto_writing verhindert, dass die eigenen Zugriffe den
           // manuellen Override auslösen.
@@ -349,7 +356,7 @@ interval:
             call.perform();
           }
           id(auto_writing) = false;
- 
+
   # LED: blinkt = kein WLAN, an = Modus Auto, aus = manuell
   - interval: 500ms
     then:
@@ -362,24 +369,23 @@ interval:
           else:
             - if:
                 condition:
-                  lambda: 'return id(fan_mode).state == "Auto";'
+                  lambda: 'return id(fan_mode).current_option() == "Auto";'
                 then:
                   - switch.turn_on: led_status_gruen
                 else:
                   - switch.turn_off: led_status_gruen
- 
+
 # ---------- Diagnose ----------
 binary_sensor:
   - platform: status
     name: "Rack Monitor Status"
- 
+
 text_sensor:
   - platform: wifi_info
     ip_address:
       name: "IP-Adresse"
- 
+
 # Neustart aus HA ohne physischen Zugriff
 button:
   - platform: restart
     name: "Rack Monitor Neustart"
- 
